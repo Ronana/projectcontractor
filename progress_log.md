@@ -204,6 +204,32 @@ No forced interstitials. No purchase prompts outside Shop. No overlays appear un
 
 ---
 
+## 2026-06-28 -- Phase 6 Complete ✅
+
+### Confirmed complete
+- Android export working (Compatibility renderer, LDPlayer)
+- Force-quit stress test passed — save/restore holds under abrupt close
+- SFX deprioritised — not needed for MVP
+- MVP Definition of Done checkpoint passed (full loop confirmed by user)
+
+### Post-MVP additions completed in earlier sessions (beyond original Phase 6 scope)
+- Prestige / New Contract system (rep points, artifacts, portfolio, contract count)
+- Tiers 4–8: Apartment Block, Retail Unit, Office Block, High-Rise, Skyscraper (BP gates 20/40/70/110/160)
+- New materials: sand, steel_ore + refined glass, steel_beam
+- New mining locations: Sand Pit, Steel Yard (4 nodes each)
+- New crew: Sandy Walsh (sand), Iron Mike (steel_ore)
+- Workshop crafting expanded to 4 recipes / 8-material inventory
+- Sell panel expanded to all 8 materials
+- CONTRACT panel: artifact shop + all-time portfolio view
+- ArtifactDatabase autoload + 5 permanent artifacts
+- Offline calculator updated to apply worker rate mult + drop bonus
+- All GDScript warnings resolved (integer division, unused variables)
+
+### Open art blocker (non-blocking for play, blocking for store submission)
+- Stage-number text baked into ModernHouseA.png cells conflicts with in-game stage UI — clean art needed before release
+
+---
+
 ## 2026-06-26 -- Phase 6 In Progress
 
 ### Completed this session
@@ -262,4 +288,73 @@ No forced interstitials. No purchase prompts outside Shop. No overlays appear un
 - MVP Definition of Done checkpoint
 
 ### Next step
-Test the UI overhaul in Godot (F5). Check for any script errors, then confirm visuals look correct before proceeding.
+~~Awaiting confirmation~~ — Phase 6 complete, post-MVP work ongoing.
+
+---
+
+## 2026-06-28 — Post-MVP: Pinnable Quick Bar + Active Material HUD
+
+### Completed this session
+- **Bottom bar redesign**: Replaced MENU + SHOP two-button layout with 5-slot pinnable bar
+  - Slots 0–3: dynamically built from `GameState.pinned_shortcuts` (Array, max 4)
+  - Slot 4: permanent "MORE" button (☰) that opens the full menu overlay
+  - Each slot: coloured icon square (code-drawn placeholder) + label
+  - Slot dividers render between all 5 slots
+- **Pin customiser panel** (CanvasLayer 28): 4×2 grid of all 8 available shortcuts
+  - Tap to pin/unpin; green border = pinned, grey = not pinned
+  - "✓ PINNED" badge on active tiles
+  - DONE button + tap-dim-to-close
+  - Accessible via "⚙ Edit Quick Bar" in the MORE menu
+- **8 available shortcuts** (`SHORTCUT_DEFS` const): BUILD, CREW, CRAFT, SELL, SKYLINE, UPGRADES, CONTRACT, SHOP
+  - Default pins: BUILD, CREW, CRAFT, SELL
+  - Each shortcut has a colour and single-character placeholder icon (B/C/W/$/S/+/R/◆)
+- **HUD 4th chip**: active material count — e.g. "28\nTimber" coloured to match active-location material
+  - Shows count + material name below; refreshes on every `_update_hud()` call
+  - HUD now has 4 equal chips across 520 px (chip_w = 130 px each)
+- **Menu overlay 3×3 layout**: expanded from 2×4 to 3×3 (added SHOP as 9th item), card_h 640→660
+- **Persistence**: `GameState.pinned_shortcuts` saved/loaded in SaveManager; survives prestige
+- **`_close_all_panels()`**: now also hides `_pin_panel`
+
+### Files changed
+- `scripts/autoload/GameState.gd` — added `pinned_shortcuts`
+- `scripts/autoload/SaveManager.gd` — save/load/fresh-state for `pinned_shortcuts`
+- `scenes/main/Main.gd` — `SHORTCUT_DEFS`, `_lbl_active_mat`, `_bottom_bar_cl`, `_pin_panel`, `_pin_slot_nodes`, `_pin_card_borders`, `_pin_state_labels`; new functions: `_rebuild_pin_slots`, `_build_pin_panel`, `_shortcut_color`, `_shortcut_def`, `_on_shortcut_pressed`, `_on_pin_edit_open/close`, `_on_pin_toggle`, `_update_pin_panel_state`
+
+### Parser errors fixed (2026-06-28 — session 2)
+During previous session, a large Edit accidentally deleted ~700 lines of Main.gd and the file was reconstructed from `git show HEAD`. This restored pre-commit functions but lost post-commit ones. The following fixes were applied:
+1. `var pinned: bool = ...` — fixed type-inference error at `_update_pin_panel_state()` (was `var pinned :=`)
+2. Inserted missing functions before `_build_shop_panel()`: `_build_contract_panel`, `_build_artifact_card`, `_build_prestige_confirm_panel`, `_update_contract_panel` — all recovered from JSONL transcript
+3. Replaced old `_update_mine_screen()` (used deleted `_loc_btns`/`_loc_indicators`) with correct redesigned version (uses `_lbl_active_loc`, `_loc_bar_accent`, `_mine_backdrop`, `_loc_picker_panel`) — also recovered from transcript
+
+All 9 Godot parser errors should now be resolved.
+
+### Next step
+Build the game in Godot and test in LDPlayer:
+1. Confirm 0 parser errors in Godot editor
+2. Bottom bar shows 4 coloured icon buttons (BUILD/CREW/CRAFT/SELL) + MORE
+3. Tapping BUILD/CREW/CRAFT/SELL opens correct panel
+4. Tapping MORE opens the 3×3 menu overlay (9 items + "⚙ Edit Quick Bar")
+5. Tapping "⚙ Edit Quick Bar" opens pin customiser
+6. Toggle a pin — slot immediately updates
+7. HUD top-right chip shows active material count and name
+
+---
+
+## 2026-06-28 — UI Polish session (continued)
+
+### Completed this session
+- **Bottom bar icons**: reduced icon_sz 44→36, recentred vertically (icon y bar+20, label y bar+60, label h 24)
+- **HUD stat chips**: removed card background boxes; kept only a 3px accent underline per chip
+- **XP bar live text**: added `_lbl_xp` member var; `_update_xp_bar()` now overlays "%d / %d XP" text on the bar
+- **Panel headers redesigned**: added `_build_panel_header(parent, title, accent)` helper and `_apply_btn_style(btn, bg, fg, radius)` helper; all 8 panels (BUILD, CREW, WORKSHOP, SKYLINE, SELL, UPGRADES, CONTRACT, SHOP) now use one-line header calls with coloured top strip, separator, centred title, and styled ✕ close button
+- **Location picker bug fixed**: removed `_loc_picker_panel.visible = false` from `_update_mine_screen()` — now only hidden in `_on_location_btn()` so it doesn't close when workers are active
+- **CRITICAL FILE RECOVERY**: Python bulk-replacement scripts (for panel headers) truncated `Main.gd` to 2931 lines — lost all functions after `_complete_building()`. Recovered by splicing current file head (lines 1–2930) with git HEAD tail (from the Crew panel separator onwards). All missing functions restored. `_update_xp_bar` patched with `_lbl_xp` fix after splice. File now 3380 lines, 107 functions.
+
+### Currently in progress / left mid-task
+- File recovery is complete. Godot needs to reload and confirm 0 parser errors.
+
+### Next step
+1. Open Godot — let it reimport `Main.gd`
+2. Check Output/Errors panel: expect 0 parser errors
+3. If clean, test the UI improvements on device/LDPlayer
+4. Continue UI polish as desired

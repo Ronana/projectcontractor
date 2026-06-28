@@ -55,15 +55,19 @@ func calculate_and_apply() -> Dictionary:
 
 # ---------------------------------------------------------------------------
 ## Calculates effective material/s for each hired crew member based on the
-## node HP and drop_qty at their assigned location. This matches the online
-## mine-tick behaviour (hp_per_s / node_hp × drop_qty = mat_per_s).
+## node HP and drop_qty at their assigned location. Matches online mine-tick
+## behaviour: applies get_worker_rate_mult() and get_drop_bonus() so offline
+## rates are consistent with what the player earns while the app is open.
 func _get_idle_rates() -> Dictionary:
-	var rates: Dictionary = {}
+	var rates:          Dictionary = {}
+	var rate_mult:      float      = GameState.get_worker_rate_mult()
+	var bonus_drops:    int        = GameState.get_drop_bonus()
+
 	for member: Dictionary in GameState.crew:
 		var loc_id: String = member.get("location_id", "lumber_yard")
 		var bonus:  float  = float(member.get("base_speed_bonus", 0.1)) \
 			* float(member.get("level", 1))
-		var hp_per_s := bonus * 4.0
+		var hp_per_s := bonus * 4.0 * rate_mult
 
 		var loc_data := BuildDatabase.get_location(loc_id)
 		if loc_data.is_empty():
@@ -72,16 +76,15 @@ func _get_idle_rates() -> Dictionary:
 
 		# Use the node currently active at this location
 		var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})
-		var node_id: String = node_state.get("node_id", "")
+		var node_id: String        = node_state.get("node_id", "")
 		var node_data := BuildDatabase.get_node_data(node_id)
 		if node_data.is_empty():
-			# Fallback: use the level-1 node
 			node_data = BuildDatabase.get_active_node(loc_id, GameState.player_level)
 		if node_data.is_empty():
 			continue
 
 		var node_hp:  float = float(node_data.get("hp", 10))
-		var drop_qty: int   = int(node_data.get("drop_qty", 1))
+		var drop_qty: int   = int(node_data.get("drop_qty", 1)) + bonus_drops
 		var mat_per_s := (hp_per_s / node_hp) * float(drop_qty)
 
 		rates[mat] = rates.get(mat, 0.0) + mat_per_s

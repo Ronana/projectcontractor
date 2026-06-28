@@ -4,11 +4,18 @@ extends Node
 ##
 ## Autoload order: can live anywhere after GameState.
 
-## Ordered tier progression for MVP (Shed -> Single House -> Two-Story House).
-const TIER_ORDER: Array[String] = ["shed", "single_house", "two_story_house"]
+## Full tier progression (Shed → Skyscraper).
+const TIER_ORDER: Array[String] = [
+	"shed", "single_house", "two_story_house",
+	"apartment_block", "retail_unit", "office_block",
+	"high_rise", "skyscraper",
+]
 
-## Ordered location progression for MVP (unlocked gradually).
-const LOCATION_ORDER: Array[String] = ["lumber_yard", "stone_quarry"]
+## All mining locations (picker shows all from level 1).
+const LOCATION_ORDER: Array[String] = [
+	"lumber_yard", "stone_quarry", "sand_pit", "steel_yard",
+	"clay_pit", "copper_mine", "limestone_quarry", "bauxite_mine",
+]
 
 var _tiers: Dictionary = {}
 var _crew_templates: Array[CrewMemberResource] = []
@@ -19,6 +26,11 @@ func _ready() -> void:
 	_register_shed()
 	_register_single_house()
 	_register_two_story_house()
+	_register_apartment_block()
+	_register_retail_unit()
+	_register_office_block()
+	_register_high_rise()
+	_register_skyscraper()
 	_register_crew()
 	_register_locations()
 
@@ -154,6 +166,124 @@ func _register_two_story_house() -> void:
 	]
 	_tiers["two_story_house"] = h
 
+func _register_apartment_block() -> void:
+	var h := BuildingTierResource.new()
+	h.id = "apartment_block"
+	h.display_name = "Apartment Block"
+	h.build_power_required = 20
+	h.unlock_condition = "build_power"
+	h.stages = [
+		_stage("ab_clearance",   "Site Clearance & Groundworks",
+			{"timber": 80, "stone": 60},                     0),
+		_stage("ab_foundations", "Deep Foundations",
+			{"concrete": 60, "stone": 50},                   1),
+		_stage("ab_gf_struct",   "Ground Floor Structure",
+			{"lumber": 80, "concrete": 60},                  2),
+		_stage("ab_floors",      "Upper Floors & Lifts",
+			{"lumber": 120, "concrete": 80},                 3),
+		_stage("ab_cladding",    "Cladding & Glazing",
+			{"lumber": 60, "glass": 40},                     4),
+		_stage("ab_fitout",      "Fit-Out & Snagging",
+			{"lumber": 60, "glass": 30, "concrete": 40},     5),
+	]
+	_tiers["apartment_block"] = h
+
+func _register_retail_unit() -> void:
+	var h := BuildingTierResource.new()
+	h.id = "retail_unit"
+	h.display_name = "Retail Unit"
+	h.build_power_required = 40
+	h.unlock_condition = "build_power"
+	h.stages = [
+		_stage("ru_clearance",   "Site Clearance & Services",
+			{"timber": 120, "stone": 80},                        0),
+		_stage("ru_foundations", "Foundations & Ground Slab",
+			{"concrete": 100, "stone": 60},                      1),
+		_stage("ru_frame",       "Steel Frame Assembly",
+			{"steel_beam": 30, "concrete": 80},                  2),
+		_stage("ru_roof",        "Roof Deck & Structure",
+			{"lumber": 100, "steel_beam": 20},                   3),
+		_stage("ru_shopfront",   "Shop Front Glazing",
+			{"glass": 70, "lumber": 80},                         4),
+		_stage("ru_interior",    "Interior Fit-Out & Snagging",
+			{"lumber": 80, "glass": 50, "concrete": 60},         5),
+	]
+	_tiers["retail_unit"] = h
+
+func _register_office_block() -> void:
+	var h := BuildingTierResource.new()
+	h.id = "office_block"
+	h.display_name = "Office Block"
+	h.build_power_required = 70
+	h.unlock_condition = "build_power"
+	h.stages = [
+		_stage("ob_clearance",   "Site Clearance & Demolition",
+			{"timber": 150, "stone": 120},                       0),
+		_stage("ob_foundations", "Piled Foundations",
+			{"concrete": 140, "stone": 80},                      1),
+		_stage("ob_frame",       "Steel Frame & Core",
+			{"steel_beam": 60, "concrete": 100},                 2),
+		_stage("ob_floors",      "Floor Plates & Staircases",
+			{"steel_beam": 40, "concrete": 80, "lumber": 100},   3),
+		_stage("ob_curtain",     "Curtain Wall Glazing",
+			{"glass": 100, "steel_beam": 30},                    4),
+		_stage("ob_mande",       "M&E Installation",
+			{"steel_beam": 40, "glass": 60, "lumber": 120},      5),
+		_stage("ob_fitout",      "Fit-Out & Commissioning",
+			{"lumber": 120, "glass": 60, "concrete": 80},        6),
+	]
+	_tiers["office_block"] = h
+
+func _register_high_rise() -> void:
+	var h := BuildingTierResource.new()
+	h.id = "high_rise"
+	h.display_name = "High-Rise Tower"
+	h.build_power_required = 110
+	h.unlock_condition = "build_power"
+	h.stages = [
+		_stage("hr_clearance",   "Site Preparation & Hoarding",
+			{"timber": 200, "stone": 150},                          0),
+		_stage("hr_foundations", "Deep Pile Foundations",
+			{"concrete": 180, "stone": 100},                        1),
+		_stage("hr_core",        "Core Structure & Lift Shafts",
+			{"steel_beam": 90, "concrete": 150},                    2),
+		_stage("hr_slabs",       "Floor Slabs ×20",
+			{"steel_beam": 80, "concrete": 120, "lumber": 150},     3),
+		_stage("hr_skin",        "External Skin Assembly",
+			{"glass": 150, "steel_beam": 60},                       4),
+		_stage("hr_mep",         "Mechanical & Electrical",
+			{"steel_beam": 60, "glass": 90, "lumber": 150},         5),
+		_stage("hr_finish",      "Finishing & Handover",
+			{"lumber": 150, "glass": 80, "concrete": 100},          6),
+	]
+	_tiers["high_rise"] = h
+
+func _register_skyscraper() -> void:
+	var h := BuildingTierResource.new()
+	h.id = "skyscraper"
+	h.display_name = "Landmark Skyscraper"
+	h.build_power_required = 160
+	h.unlock_condition = "build_power"
+	h.stages = [
+		_stage("sk_site",        "Site Acquisition & Set-Up",
+			{"timber": 250, "stone": 200},                            0),
+		_stage("sk_foundation",  "Mega-Foundation",
+			{"concrete": 250, "stone": 150},                          1),
+		_stage("sk_core",        "Core Structure & Podium",
+			{"steel_beam": 130, "concrete": 220},                     2),
+		_stage("sk_tower",       "Tower Structure",
+			{"steel_beam": 150, "concrete": 180, "lumber": 200},      3),
+		_stage("sk_spire",       "Spire & Crown",
+			{"steel_beam": 120, "glass": 180},                        4),
+		_stage("sk_skin",        "External Skin & Cladding",
+			{"glass": 220, "steel_beam": 90, "lumber": 150},          5),
+		_stage("sk_mep",         "MEP Systems & Services",
+			{"steel_beam": 80, "glass": 130, "lumber": 200},          6),
+		_stage("sk_fitout",      "Interior Fit-Out & Handover",
+			{"lumber": 250, "glass": 150, "concrete": 150},           7),
+	]
+	_tiers["skyscraper"] = h
+
 # ── Location registration ────────────────────────────────────────────────────
 ## Node HP/XP scaled similarly to IOM ore system.
 ## HP starts at 10 (Sapling / Pebble) and scales with unlock_level.
@@ -182,6 +312,72 @@ func _register_locations() -> void:
 			{"id": "granite", "name": "Granite", "hp": 200, "drop_qty": 5, "xp": 35, "unlock_level": 10},
 		]
 	}
+	_locations["sand_pit"] = {
+		"display_name": "Sand Pit",
+		"material":     "sand",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "sand_pile",   "name": "Sand Pile",   "hp": 10,  "drop_qty": 1, "xp": 2,  "unlock_level": 1},
+			{"id": "coarse_sand", "name": "Coarse Sand", "hp": 30,  "drop_qty": 2, "xp": 6,  "unlock_level": 3},
+			{"id": "fine_sand",   "name": "Fine Sand",   "hp": 80,  "drop_qty": 3, "xp": 15, "unlock_level": 6},
+			{"id": "silica_bed",  "name": "Silica Bed",  "hp": 200, "drop_qty": 5, "xp": 35, "unlock_level": 10},
+		]
+	}
+	_locations["steel_yard"] = {
+		"display_name": "Steel Yard",
+		"material":     "steel_ore",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "iron_scraps",  "name": "Iron Scraps",  "hp": 12,  "drop_qty": 1, "xp": 3,  "unlock_level": 1},
+			{"id": "iron_ore",     "name": "Iron Ore",     "hp": 40,  "drop_qty": 2, "xp": 8,  "unlock_level": 4},
+			{"id": "steel_billet", "name": "Steel Billet", "hp": 100, "drop_qty": 3, "xp": 20, "unlock_level": 8},
+			{"id": "high_grade",   "name": "High Grade",   "hp": 250, "drop_qty": 5, "xp": 45, "unlock_level": 12},
+		]
+	}
+	_locations["clay_pit"] = {
+		"display_name": "Clay Pit",
+		"material":     "clay",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "clay_mound",   "name": "Clay Mound",   "hp": 15,  "drop_qty": 1, "xp": 3,  "unlock_level": 1},
+			{"id": "clay_bed",     "name": "Clay Bed",     "hp": 45,  "drop_qty": 2, "xp": 9,  "unlock_level": 4},
+			{"id": "rich_clay",    "name": "Rich Clay",    "hp": 120, "drop_qty": 3, "xp": 22, "unlock_level": 8},
+			{"id": "pure_clay",    "name": "Pure Clay",    "hp": 300, "drop_qty": 5, "xp": 50, "unlock_level": 13},
+		]
+	}
+	_locations["copper_mine"] = {
+		"display_name": "Copper Mine",
+		"material":     "copper_ore",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "copper_flakes", "name": "Copper Flakes", "hp": 18,  "drop_qty": 1, "xp": 4,  "unlock_level": 1},
+			{"id": "copper_vein",   "name": "Copper Vein",   "hp": 55,  "drop_qty": 2, "xp": 11, "unlock_level": 5},
+			{"id": "rich_vein",     "name": "Rich Vein",     "hp": 140, "drop_qty": 3, "xp": 28, "unlock_level": 9},
+			{"id": "native_copper", "name": "Native Copper", "hp": 350, "drop_qty": 5, "xp": 60, "unlock_level": 14},
+		]
+	}
+	_locations["limestone_quarry"] = {
+		"display_name": "Limestone Quarry",
+		"material":     "limestone",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "limestone_slab",  "name": "Limestone Slab",  "hp": 20,  "drop_qty": 1, "xp": 5,  "unlock_level": 1},
+			{"id": "limestone_block", "name": "Limestone Block",  "hp": 60,  "drop_qty": 2, "xp": 12, "unlock_level": 5},
+			{"id": "fossil_bed",      "name": "Fossil Bed",       "hp": 160, "drop_qty": 3, "xp": 32, "unlock_level": 10},
+			{"id": "white_limestone", "name": "White Limestone",  "hp": 400, "drop_qty": 5, "xp": 70, "unlock_level": 15},
+		]
+	}
+	_locations["bauxite_mine"] = {
+		"display_name": "Bauxite Mine",
+		"material":     "bauxite",
+		"unlock_level": 1,
+		"nodes": [
+			{"id": "bauxite_soil", "name": "Bauxite Soil",    "hp": 22,  "drop_qty": 1, "xp": 5,  "unlock_level": 1},
+			{"id": "bauxite_rock", "name": "Bauxite Rock",    "hp": 70,  "drop_qty": 2, "xp": 14, "unlock_level": 6},
+			{"id": "red_bauxite",  "name": "Red Bauxite",     "hp": 180, "drop_qty": 3, "xp": 36, "unlock_level": 11},
+			{"id": "grade_a",      "name": "Grade-A Bauxite", "hp": 450, "drop_qty": 5, "xp": 80, "unlock_level": 16},
+		]
+	}
 
 # ── Crew registration ────────────────────────────────────────────────────────
 ## base_speed_bonus: material/s at level 1.
@@ -189,9 +385,15 @@ func _register_locations() -> void:
 
 func _register_crew() -> void:
 	_crew_templates = [
-		_crew("old_bob",      "Old Bob",      "timber", "lumber_yard",  40,  0.5),
-		_crew("granite_pete", "Granite Pete", "stone",  "stone_quarry", 75,  1.0),
-		_crew("nimble_nick",  "Nimble Nick",  "timber", "lumber_yard",  90,  1.0),
+		_crew("old_bob",      "Old Bob",      "timber",     "lumber_yard",      40,  0.5),
+		_crew("granite_pete", "Granite Pete", "stone",      "stone_quarry",     75,  1.0),
+		_crew("nimble_nick",  "Nimble Nick",  "timber",     "lumber_yard",      90,  1.0),
+		_crew("sandy_walsh",  "Sandy Walsh",  "sand",       "sand_pit",         70,  0.8),
+		_crew("iron_mike",    "Iron Mike",    "steel_ore",  "steel_yard",       110, 1.0),
+		_crew("clay_molly",   "Clay Molly",   "clay",       "clay_pit",         90,  0.8),
+		_crew("copper_carl",  "Copper Carl",  "copper_ore", "copper_mine",      120, 0.9),
+		_crew("lime_larry",   "Lime Larry",   "limestone",  "limestone_quarry", 140, 1.0),
+		_crew("boxy_dave",    "Boxy Dave",    "bauxite",    "bauxite_mine",     160, 1.1),
 	]
 
 func _crew(id: String, crew_name: String, mat: String, loc: String, cost: int, bonus: float) -> CrewMemberResource:

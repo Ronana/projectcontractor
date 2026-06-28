@@ -19,15 +19,16 @@ config/icon="res://icon.svg"
 
 GameState="*res://scripts/autoload/GameState.gd"
 BuildDatabase="*res://scripts/data/BuildDatabase.gd"
-UpgradeDatabase="*res://scripts/autoload/UpgradeDatabase.gd"
 SaveManager="*res://scripts/autoload/SaveManager.gd"
 OfflineProgressCalculator="*res://scripts/autoload/OfflineProgressCalculator.gd"
+UpgradeDatabase="*res://scripts/autoload/UpgradeDatabase.gd"
+ArtifactDatabase="*res://scripts/autoload/ArtifactDatabase.gd"
 
 [display]
 
 window/size/viewport_width=720
 window/size/viewport_height=1280
-window/handheld/orientation="portrait"
+window/handheld/orientation=1
 
 [physics]
 
@@ -36,4 +37,6 @@ window/handheld/orientation="portrait"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
-renderer/rendering_method="mobile"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true

@@ -26,6 +26,18 @@ const _CELL_W           := 281
 const _CELL_H           := 384
 const _LOGO_W           := 200
 
+## All available quick-bar shortcuts. Order = display order in pin panel.
+const SHORTCUT_DEFS: Array = [
+	{"id": "build",    "label": "BUILD",    "symbol": "B"},
+	{"id": "crew",     "label": "CREW",     "symbol": "C"},
+	{"id": "craft",    "label": "CRAFT",    "symbol": "W"},
+	{"id": "sell",     "label": "SELL",     "symbol": "$"},
+	{"id": "skyline",  "label": "SKYLINE",  "symbol": "S"},
+	{"id": "upgrades", "label": "UPGRADES", "symbol": "+"},
+	{"id": "contract", "label": "CONTRACT", "symbol": "R"},
+	{"id": "shop",     "label": "SHOP",     "symbol": "◆"},
+]
+
 # ── Colour palette ─────────────────────────────────────────────────────────
 const C_BG       := Color(0.06, 0.07, 0.10)
 const C_PANEL    := Color(0.09, 0.10, 0.15, 0.98)
@@ -33,10 +45,22 @@ const C_CARD     := Color(0.13, 0.14, 0.20)
 const C_BORDER   := Color(0.20, 0.22, 0.32)
 const C_GOLD     := Color(1.00, 0.78, 0.20)
 const C_GEM      := Color(0.40, 0.85, 1.00)
-const C_TIMBER   := Color(0.82, 0.57, 0.25)
-const C_STONE    := Color(0.70, 0.70, 0.76)
-const C_LUMBER   := Color(0.95, 0.72, 0.30)
-const C_CONCRETE := Color(0.55, 0.55, 0.62)
+const C_TIMBER     := Color(0.82, 0.57, 0.25)
+const C_STONE      := Color(0.70, 0.70, 0.76)
+const C_LUMBER     := Color(0.95, 0.72, 0.30)
+const C_CONCRETE   := Color(0.55, 0.55, 0.62)
+const C_SAND       := Color(0.88, 0.78, 0.45)
+const C_STEEL_ORE  := Color(0.60, 0.65, 0.72)
+const C_GLASS      := Color(0.55, 0.88, 0.95)
+const C_STEEL_BEAM := Color(0.45, 0.52, 0.65)
+const C_CLAY       := Color(0.80, 0.48, 0.28)
+const C_COPPER_ORE := Color(0.72, 0.45, 0.20)
+const C_LIMESTONE  := Color(0.85, 0.82, 0.70)
+const C_BAUXITE    := Color(0.75, 0.38, 0.22)
+const C_BRICK      := Color(0.72, 0.28, 0.18)
+const C_COPPER_PIPE := Color(0.82, 0.58, 0.22)
+const C_PLASTER    := Color(0.88, 0.86, 0.76)
+const C_ALUMINIUM  := Color(0.76, 0.80, 0.88)
 const C_GREEN    := Color(0.25, 0.80, 0.42)
 const C_RED      := Color(0.85, 0.28, 0.28)
 const C_ACCENT   := Color(0.28, 0.62, 1.00)
@@ -45,14 +69,17 @@ const C_DIM      := Color(0.50, 0.52, 0.60)
 const C_XP       := Color(0.70, 0.35, 1.00)
 
 # ── HUD refs ───────────────────────────────────────────────────────────────
-var _lbl_cash:    Label
-var _lbl_gems:    Label
-var _lbl_level:   Label
-var _xp_bar_fill: ColorRect
+var _lbl_cash:       Label
+var _lbl_gems:       Label
+var _lbl_level:      Label
+var _lbl_active_mat: Label    # 4th chip: active-material count
+var _lbl_xp:         Label    # XP bar overlay label (shows live numbers)
+var _xp_bar_fill:    ColorRect
 
 # ── Mine screen refs ───────────────────────────────────────────────────────
-var _loc_btns:         Array[Button]    = []
-var _loc_indicators:   Array[ColorRect] = []
+var _lbl_active_loc:   Label            # active location name in the bar
+var _loc_bar_accent:   ColorRect        # coloured underline strip
+var _loc_picker_panel: CanvasLayer      # vertical location picker overlay
 var _node_rect:        ColorRect   # inner fill
 var _node_border:      ColorRect   # outer border
 var _node_accent_bar:  ColorRect   # top colour strip
@@ -66,6 +93,8 @@ var _lbl_mat_count:    Label
 var _lbl_mine_rate:    Label
 var _lbl_feedback:     Label
 var _feedback_tween:   Tween
+var _mine_backdrop:        TextureRect
+var _last_backdrop_loc:    String = ""
 
 # ── Build panel refs ───────────────────────────────────────────────────────
 var _build_panel:       CanvasLayer
@@ -84,6 +113,13 @@ var _lbl_build_feedback:Label
 
 # ── Menu overlay refs ──────────────────────────────────────────────────────
 var _menu_overlay: CanvasLayer
+
+# ── Quick bar (bottom bar) refs ────────────────────────────────────────────
+var _bottom_bar_cl:    CanvasLayer
+var _pin_slot_nodes:   Array[Node]      = []   # rebuilt whenever pins change
+var _pin_panel:        CanvasLayer             # pin-customiser overlay
+var _pin_card_borders: Array[ColorRect] = []   # one per SHORTCUT_DEFS entry
+var _pin_state_labels: Array[Label]     = []   # "✓ PINNED" labels
 
 # ── Crew panel refs ────────────────────────────────────────────────────────
 var _crew_panel:          CanvasLayer
@@ -119,6 +155,21 @@ var _sell_panel:       CanvasLayer
 var _sell_inv_lbls:    Array[Label]  = []   # current qty per material
 var _sell_earn_lbls:   Array[Label]  = []   # "= X cash" preview
 
+# ── Contract panel refs ────────────────────────────────────────────────────
+var _contract_panel:       CanvasLayer
+var _lbl_contract_rep:     Label
+var _artifact_cards:       Array[Dictionary] = []  # {id, outer, name_lbl, level_lbl, cost_lbl, btn}
+var _portfolio_list_box:   VBoxContainer
+
+# ── Prestige confirm panel refs ────────────────────────────────────────────
+var _prestige_confirm_panel:  CanvasLayer
+var _lbl_prestige_rep_earned: Label
+var _lbl_prestige_new_rep:    Label
+
+# ── Skyline panel "New Contract" footer refs ────────────────────────────────
+var _btn_new_contract:          Button
+var _lbl_new_contract_locked:   Label
+
 # ── Shop panel refs ────────────────────────────────────────────────────────
 var _shop_panel:     CanvasLayer
 var _lbl_shop_gems:  Label
@@ -134,10 +185,13 @@ var _worker_dmg_accum: Dictionary = {}
 
 func _ready() -> void:
 	_build_splash()
+	_build_backdrop()
 	_build_hud()
 	_build_location_bar()
+	_build_loc_picker_panel()
 	_build_mine_area()
 	_build_bottom_bar()
+	_build_pin_panel()
 	_build_menu_overlay()
 	_build_build_panel()
 	_build_crew_panel()
@@ -146,6 +200,8 @@ func _ready() -> void:
 	_build_skyline_panel()
 	_build_upgrades_panel()
 	_build_sell_panel()
+	_build_contract_panel()
+	_build_prestige_confirm_panel()
 	_build_shop_panel()
 	_update_display()
 	_check_offline_summary()
@@ -172,11 +228,11 @@ func _build_splash() -> void:
 
 	var logo_tex := load("res://assets/imported/MainLogoWText.png") as Texture2D
 	if logo_tex:
-		var logo         := TextureRect.new()
-		logo.texture      = logo_tex
-		logo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		logo.position     = Vector2(40, SCREEN_H / 2.0 - 100)
-		logo.size         = Vector2(640, 200)
+		var logo          := Sprite2D.new()
+		logo.texture       = logo_tex
+		var scale_f        := float(SCREEN_W - 40) / float(logo_tex.get_width())
+		logo.scale         = Vector2(scale_f, scale_f)
+		logo.position      = Vector2(SCREEN_W / 2.0, SCREEN_H / 2.0)
 		cl.add_child(logo)
 
 	var skip_btn     := Button.new()
@@ -201,7 +257,7 @@ func _build_hud() -> void:
 	add_child(cl)
 
 	var bg      := ColorRect.new()
-	bg.color     = Color(0.07, 0.08, 0.12)
+	bg.color     = Color(0.07, 0.08, 0.12, 0.72)
 	bg.position  = Vector2.ZERO
 	bg.size      = Vector2(SCREEN_W, HUD_H)
 	cl.add_child(bg)
@@ -222,11 +278,20 @@ func _build_hud() -> void:
 		logo.size         = Vector2(_LOGO_W, HUD_H - 26)
 		cl.add_child(logo)
 
-	# Stat chips: Cash | Gems | Level  (right of logo)
-	var chip_w := float(SCREEN_W - _LOGO_W) / 3.0
-	_lbl_cash  = _hud_chip(cl, "$ 0",  C_GOLD,   _LOGO_W + chip_w * 0, chip_w)
-	_lbl_gems  = _hud_chip(cl, "◆ 0",  C_GEM,    _LOGO_W + chip_w * 1, chip_w)
-	_lbl_level = _hud_chip(cl, "Lv.1", C_ACCENT, _LOGO_W + chip_w * 2, chip_w)
+	# Stat chips: Cash | Gems | Level | Active-Mat  (right of logo)
+	var chip_w := float(SCREEN_W - _LOGO_W) / 4.0
+	_lbl_cash       = _hud_chip(cl, "$ 0",      C_GOLD,   _LOGO_W + chip_w * 0, chip_w)
+	_lbl_gems       = _hud_chip(cl, "◆ 0",      C_GEM,    _LOGO_W + chip_w * 1, chip_w)
+	_lbl_level      = _hud_chip(cl, "Lv.1",     C_ACCENT, _LOGO_W + chip_w * 2, chip_w)
+	_lbl_active_mat = _hud_chip(cl, "0\nTimber", C_TIMBER, _LOGO_W + chip_w * 3, chip_w)
+
+	# Subtle vertical dividers between the 4 chips
+	for i in 3:
+		var div      := ColorRect.new()
+		div.color     = Color(0.30, 0.32, 0.45, 0.4)
+		div.position  = Vector2(_LOGO_W + chip_w * (i + 1), 14)
+		div.size      = Vector2(1, HUD_H - 46)
+		cl.add_child(div)
 
 	# XP bar strip along the bottom of the HUD
 	var xp_bg      := ColorRect.new()
@@ -241,18 +306,25 @@ func _build_hud() -> void:
 	_xp_bar_fill.size     = Vector2(0, 20)
 	cl.add_child(_xp_bar_fill)
 
-	var xp_lbl      := Label.new()
-	xp_lbl.name      = "XpLabel"
-	xp_lbl.text      = "XP"
-	xp_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	xp_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	xp_lbl.position  = Vector2(0, HUD_H - 22)
-	xp_lbl.size      = Vector2(SCREEN_W, 20)
-	xp_lbl.add_theme_font_size_override("font_size", 11)
-	xp_lbl.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
-	cl.add_child(xp_lbl)
+	_lbl_xp          = Label.new()
+	_lbl_xp.name     = "XpLabel"
+	_lbl_xp.text     = "XP"
+	_lbl_xp.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_xp.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_xp.position = Vector2(0, HUD_H - 22)
+	_lbl_xp.size     = Vector2(SCREEN_W, 20)
+	_lbl_xp.add_theme_font_size_override("font_size", 11)
+	_lbl_xp.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
+	cl.add_child(_lbl_xp)
 
 func _hud_chip(parent: CanvasLayer, text: String, color: Color, x: float, w: float) -> Label:
+	# Thin coloured accent line at bottom of chip area
+	var accent      := ColorRect.new()
+	accent.color     = color
+	accent.position  = Vector2(x + 6, HUD_H - 28)
+	accent.size      = Vector2(w - 12, 3)
+	parent.add_child(accent)
+
 	var lbl := Label.new()
 	lbl.text                 = text
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -263,57 +335,258 @@ func _hud_chip(parent: CanvasLayer, text: String, color: Color, x: float, w: flo
 	parent.add_child(lbl)
 	return lbl
 
+## Applies a coloured StyleBoxFlat to a button for all interaction states.
+## Call once after creating any action button instead of add_theme_color_override.
+func _apply_btn_style(btn: Button, bg: Color, fg: Color = Color.WHITE, radius: int = 6) -> void:
+	btn.add_theme_color_override("font_color", fg)
+	for state: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var s := StyleBoxFlat.new()
+		match state:
+			"normal":   s.bg_color = bg
+			"hover":    s.bg_color = bg.lightened(0.12)
+			"pressed":  s.bg_color = bg.darkened(0.18)
+			"disabled": s.bg_color = Color(bg.r, bg.g, bg.b, 0.28)
+			"focus":    s.bg_color = bg.lightened(0.06)
+		s.corner_radius_top_left     = radius
+		s.corner_radius_top_right    = radius
+		s.corner_radius_bottom_left  = radius
+		s.corner_radius_bottom_right = radius
+		btn.add_theme_stylebox_override(state, s)
+
+## Builds a standard panel header: coloured top strip, dark bg, bottom separator,
+## centred title, styled close button. Returns the close button for signal connection.
+func _build_panel_header(parent: Node, title_text: String, accent: Color) -> Button:
+	# Dark header background
+	var header      := ColorRect.new()
+	header.color     = Color(0.07, 0.08, 0.13)
+	header.position  = Vector2.ZERO
+	header.size      = Vector2(SCREEN_W, 78)
+	parent.add_child(header)
+
+	# Coloured top strip
+	var top_strip      := ColorRect.new()
+	top_strip.color     = accent
+	top_strip.position  = Vector2.ZERO
+	top_strip.size      = Vector2(SCREEN_W, 4)
+	parent.add_child(top_strip)
+
+	# Bottom separator (slightly dimmed accent)
+	var sep      := ColorRect.new()
+	sep.color     = accent.darkened(0.25)
+	sep.position  = Vector2(0, 76)
+	sep.size      = Vector2(SCREEN_W, 2)
+	parent.add_child(sep)
+
+	# Title label
+	var title      := Label.new()
+	title.text      = title_text
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title.position  = Vector2(60, 4)
+	title.size      = Vector2(SCREEN_W - 120, 72)
+	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	parent.add_child(title)
+
+	# Close button
+	var close_btn     := Button.new()
+	close_btn.flat     = true
+	close_btn.text     = "✕"
+	close_btn.position = Vector2(SCREEN_W - 68, 12)
+	close_btn.size     = Vector2(52, 52)
+	close_btn.add_theme_font_size_override("font_size", 17)
+	close_btn.add_theme_color_override("font_color", Color(0.55, 0.57, 0.70))
+	parent.add_child(close_btn)
+
+	return close_btn
+
 # ── Location selector bar ───────────────────────────────────────────────────
 func _build_location_bar() -> void:
 	var bg      := ColorRect.new()
-	bg.color     = Color(0.07, 0.08, 0.13)
+	bg.color     = Color(0.07, 0.08, 0.13, 0.72)
 	bg.position  = Vector2(0, HUD_H)
 	bg.size      = Vector2(SCREEN_W, LOC_BAR_H)
 	add_child(bg)
 
-	var sep      := ColorRect.new()
-	sep.color     = C_BORDER
-	sep.position  = Vector2(0, HUD_H + LOC_BAR_H - 2)
-	sep.size      = Vector2(SCREEN_W, 2)
-	add_child(sep)
+	# Accent underline (colour changes with active location)
+	_loc_bar_accent         = ColorRect.new()
+	_loc_bar_accent.color   = C_TIMBER
+	_loc_bar_accent.position = Vector2(0, HUD_H + LOC_BAR_H - 4)
+	_loc_bar_accent.size    = Vector2(SCREEN_W, 4)
+	add_child(_loc_bar_accent)
 
-	var locs  := BuildDatabase.LOCATION_ORDER
-	var btn_w := float(SCREEN_W) / float(locs.size())
+	# Active location label
+	_lbl_active_loc = Label.new()
+	_lbl_active_loc.text = "Lumber Yard"
+	_lbl_active_loc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_active_loc.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_active_loc.position = Vector2(0, HUD_H)
+	_lbl_active_loc.size     = Vector2(SCREEN_W - 80, LOC_BAR_H)
+	_lbl_active_loc.add_theme_font_size_override("font_size", 18)
+	_lbl_active_loc.add_theme_color_override("font_color", C_TEXT)
+	add_child(_lbl_active_loc)
 
-	for i in locs.size():
-		var loc_id: String   = locs[i]
-		var loc_data         := BuildDatabase.get_location(loc_id)
-		var dname: String    = loc_data.get("display_name", loc_id)
-		var mat: String      = loc_data.get("material", "timber")
-		var accent           := _mat_color(mat)
+	# Chevron button (right side)
+	var chevron      := Button.new()
+	chevron.text      = "▼"
+	chevron.flat      = true
+	chevron.position  = Vector2(SCREEN_W - 72, HUD_H + 4)
+	chevron.size      = Vector2(64, LOC_BAR_H - 8)
+	chevron.add_theme_font_size_override("font_size", 20)
+	chevron.add_theme_color_override("font_color", C_DIM)
+	chevron.pressed.connect(_on_loc_picker_open)
+	add_child(chevron)
 
-		var btn      := Button.new()
-		btn.flat      = true
-		btn.text      = dname
-		btn.position  = Vector2(i * btn_w, HUD_H)
-		btn.size      = Vector2(btn_w, LOC_BAR_H - 2)
-		btn.pressed.connect(_on_location_btn.bind(loc_id))
-		btn.add_theme_color_override("font_color", C_DIM)
-		add_child(btn)
-		_loc_btns.append(btn)
+	# Tap the whole bar to open picker too
+	var bar_btn      := Button.new()
+	bar_btn.flat      = true
+	bar_btn.position  = Vector2(0, HUD_H)
+	bar_btn.size      = Vector2(SCREEN_W - 72, LOC_BAR_H)
+	bar_btn.pressed.connect(_on_loc_picker_open)
+	add_child(bar_btn)
 
-		# Active-tab underline indicator
-		var ind      := ColorRect.new()
-		ind.color     = accent
-		ind.position  = Vector2(i * btn_w + 20, HUD_H + LOC_BAR_H - 6)
-		ind.size      = Vector2(btn_w - 40, 4)
-		ind.visible   = false
-		add_child(ind)
-		_loc_indicators.append(ind)
+func _build_loc_picker_panel() -> void:
+	_loc_picker_panel        = CanvasLayer.new()
+	_loc_picker_panel.layer  = 22
+	_loc_picker_panel.visible = false
+	add_child(_loc_picker_panel)
+
+	# Dim backdrop
+	var dim      := ColorRect.new()
+	dim.color     = Color(0, 0, 0, 0.6)
+	dim.position  = Vector2.ZERO
+	dim.size      = Vector2(SCREEN_W, SCREEN_H)
+	dim.gui_input.connect(func(ev):
+		if ev is InputEventMouseButton and ev.pressed:
+			_loc_picker_panel.visible = false)
+	_loc_picker_panel.add_child(dim)
+
+	# Panel card
+	var card_w := 660
+	var card_h := 900
+	var card_x := (SCREEN_W - card_w) / 2.0
+	var card_y := (SCREEN_H - card_h) / 2.0
+
+	var card      := ColorRect.new()
+	card.color     = C_PANEL
+	card.position  = Vector2(card_x, card_y)
+	card.size      = Vector2(card_w, card_h)
+	_loc_picker_panel.add_child(card)
+
+	var top_bar      := ColorRect.new()
+	top_bar.color     = C_ACCENT
+	top_bar.position  = Vector2(card_x, card_y)
+	top_bar.size      = Vector2(card_w, 4)
+	_loc_picker_panel.add_child(top_bar)
+
+	var title      := Label.new()
+	title.text      = "SELECT LOCATION"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position  = Vector2(card_x, card_y + 10)
+	title.size      = Vector2(card_w, 44)
+	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_color_override("font_color", C_TEXT)
+	_loc_picker_panel.add_child(title)
+
+	var close_btn      := Button.new()
+	close_btn.text      = "✕"
+	close_btn.flat      = true
+	close_btn.position  = Vector2(card_x + card_w - 52, card_y + 8)
+	close_btn.size      = Vector2(44, 36)
+	close_btn.add_theme_color_override("font_color", C_DIM)
+	close_btn.pressed.connect(func(): _loc_picker_panel.visible = false)
+	_loc_picker_panel.add_child(close_btn)
+
+	# Scroll area for location cards
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(card_x + 12, card_y + 60)
+	scroll.size      = Vector2(card_w - 24, card_h - 72)
+	_loc_picker_panel.add_child(scroll)
+
+	var vbox      := VBoxContainer.new()
+	vbox.size      = Vector2(card_w - 24, 0)
+	scroll.add_child(vbox)
+
+	for loc_id: String in BuildDatabase.LOCATION_ORDER:
+		var loc_data := BuildDatabase.get_location(loc_id)
+		var dname: String = loc_data.get("display_name", loc_id)
+		var mat: String   = loc_data.get("material", "timber")
+		var accent        := _mat_color(mat)
+
+		var row      := Button.new()
+		row.flat      = true
+		row.custom_minimum_size = Vector2(card_w - 24, 100)
+		row.pressed.connect(_on_location_btn.bind(loc_id))
+		vbox.add_child(row)
+
+		# Coloured left strip
+		var strip      := ColorRect.new()
+		strip.color     = accent
+		strip.position  = Vector2(0, 8)
+		strip.size      = Vector2(6, 84)
+		row.add_child(strip)
+
+		# Location name
+		var name_lbl      := Label.new()
+		name_lbl.text      = dname
+		name_lbl.position  = Vector2(20, 16)
+		name_lbl.size      = Vector2(card_w - 80, 36)
+		name_lbl.add_theme_font_size_override("font_size", 18)
+		name_lbl.add_theme_color_override("font_color", C_TEXT)
+		row.add_child(name_lbl)
+
+		# Material type label
+		var mat_lbl      := Label.new()
+		mat_lbl.text      = mat.capitalize()
+		mat_lbl.position  = Vector2(20, 54)
+		mat_lbl.size      = Vector2(card_w - 80, 28)
+		mat_lbl.add_theme_font_size_override("font_size", 14)
+		mat_lbl.add_theme_color_override("font_color", accent)
+		row.add_child(mat_lbl)
+
+		# Separator
+		var sep      := ColorRect.new()
+		sep.color     = C_BORDER
+		sep.custom_minimum_size = Vector2(card_w - 24, 2)
+		vbox.add_child(sep)
+
+func _on_loc_picker_open() -> void:
+	_loc_picker_panel.visible = true
 
 # ── Mine area ───────────────────────────────────────────────────────────────
+## Backdrop texture paths per location. Add entries as art is ready.
+const BACKDROP_PATHS: Dictionary = {
+	"lumber_yard":      "res://assets/imported/bg_lumber_yard.png",
+	"stone_quarry":     "res://assets/imported/bg_stone_quarry.png",
+	"sand_pit":         "res://assets/imported/bg_sand_pit.png",
+	"steel_yard":       "res://assets/imported/bg_steel_yard.png",
+	# "clay_pit":       "res://assets/imported/bg_clay_pit.png",
+	# "copper_mine":    "res://assets/imported/bg_copper_mine.png",
+	# "limestone_quarry": "res://assets/imported/bg_limestone_quarry.png",
+	# "bauxite_mine":   "res://assets/imported/bg_bauxite_mine.png",
+}
+
+## Full-screen backdrop on a negative CanvasLayer so it sits behind
+## ALL Node2D children (location bar, mine area) and all positive layers.
+func _build_backdrop() -> void:
+	var cl      := CanvasLayer.new()
+	cl.layer     = -1
+	add_child(cl)
+
+	_mine_backdrop              = TextureRect.new()
+	_mine_backdrop.position     = Vector2.ZERO
+	_mine_backdrop.size         = Vector2(SCREEN_W, SCREEN_H)
+	_mine_backdrop.expand_mode  = TextureRect.EXPAND_IGNORE_SIZE
+	_mine_backdrop.stretch_mode = TextureRect.STRETCH_SCALE
+	cl.add_child(_mine_backdrop)
+
 func _build_mine_area() -> void:
-	# Dark background fill
-	var bg      := ColorRect.new()
-	bg.color     = C_BG
-	bg.position  = Vector2(0, MINE_Y)
-	bg.size      = Vector2(SCREEN_W, MINE_H)
-	add_child(bg)
+	# Overlay to keep mine card text readable against bright backdrops
+	var overlay      := ColorRect.new()
+	overlay.color     = Color(0.0, 0.0, 0.0, 0.40)
+	overlay.position  = Vector2(0, MINE_Y)
+	overlay.size      = Vector2(SCREEN_W, MINE_H)
+	add_child(overlay)
 
 	# ── Node visual (centered card) ─────────────────────────────────────────
 	# Card: x=210, y=MINE_Y+90, size=300×280
@@ -424,64 +697,134 @@ func _build_mine_area() -> void:
 	tap_btn.pressed.connect(_on_tap_node)
 	add_child(tap_btn)
 
-# ── Bottom bar (MENU + SHOP) ────────────────────────────────────────────────
+# ── Bottom bar (4 pinnable slots + MORE) ───────────────────────────────────
 func _build_bottom_bar() -> void:
-	var cl  := CanvasLayer.new()
-	cl.name  = "BottomBar"
-	cl.layer = 50
-	add_child(cl)
+	_bottom_bar_cl        = CanvasLayer.new()
+	_bottom_bar_cl.name   = "BottomBar"
+	_bottom_bar_cl.layer  = 50
+	add_child(_bottom_bar_cl)
 
+	var bar_y   := SCREEN_H - BOTTOM_BAR_H
+	var slot_w  := SCREEN_W / 5   # 144 px per slot (5 slots total)
+
+	# Background
 	var bg      := ColorRect.new()
-	bg.color     = Color(0.07, 0.08, 0.12)
-	bg.position  = Vector2(0, SCREEN_H - BOTTOM_BAR_H)
+	bg.color     = Color(0.07, 0.08, 0.12, 0.88)
+	bg.position  = Vector2(0, bar_y)
 	bg.size      = Vector2(SCREEN_W, BOTTOM_BAR_H)
-	cl.add_child(bg)
+	_bottom_bar_cl.add_child(bg)
 
+	# Top border line
 	var sep      := ColorRect.new()
 	sep.color     = C_BORDER
-	sep.position  = Vector2(0, SCREEN_H - BOTTOM_BAR_H)
+	sep.position  = Vector2(0, bar_y)
 	sep.size      = Vector2(SCREEN_W, 2)
-	cl.add_child(sep)
+	_bottom_bar_cl.add_child(sep)
 
-	# MENU button (left)
-	var menu_bg      := ColorRect.new()
-	menu_bg.color     = Color(0.10, 0.11, 0.17)
-	menu_bg.position  = Vector2(12, SCREEN_H - BOTTOM_BAR_H + 10)
-	menu_bg.size      = Vector2(310, BOTTOM_BAR_H - 20)
-	cl.add_child(menu_bg)
+	# Slot dividers (between each slot)
+	for i in 4:
+		var div      := ColorRect.new()
+		div.color     = Color(0.22, 0.24, 0.34, 0.6)
+		div.position  = Vector2(slot_w * (i + 1), bar_y + 10)
+		div.size      = Vector2(1, BOTTOM_BAR_H - 20)
+		_bottom_bar_cl.add_child(div)
 
-	var menu_btn      := Button.new()
-	menu_btn.flat      = true
-	menu_btn.text      = "☰  MENU"
-	menu_btn.position  = Vector2(12, SCREEN_H - BOTTOM_BAR_H + 10)
-	menu_btn.size      = Vector2(310, BOTTOM_BAR_H - 20)
-	menu_btn.pressed.connect(_on_menu_btn_pressed)
-	menu_btn.add_theme_color_override("font_color", C_TEXT)
-	menu_btn.add_theme_font_size_override("font_size", 18)
-	cl.add_child(menu_btn)
+	# MORE button — always slot 4 (rightmost)
+	var more_x     := slot_w * 4
+	var icon_sz    := 36
+	var more_icon_x := more_x + (slot_w - icon_sz) / 2.0
 
-	# SHOP button (right)
-	var shop_bg      := ColorRect.new()
-	shop_bg.color     = C_GEM.darkened(0.75)
-	shop_bg.position  = Vector2(398, SCREEN_H - BOTTOM_BAR_H + 10)
-	shop_bg.size      = Vector2(310, BOTTOM_BAR_H - 20)
-	cl.add_child(shop_bg)
+	var more_icon      := ColorRect.new()
+	more_icon.color     = Color(0.18, 0.20, 0.28)
+	more_icon.position  = Vector2(more_icon_x, bar_y + 20)
+	more_icon.size      = Vector2(icon_sz, icon_sz)
+	_bottom_bar_cl.add_child(more_icon)
 
-	var shop_top      := ColorRect.new()
-	shop_top.color     = C_GEM
-	shop_top.position  = Vector2(398, SCREEN_H - BOTTOM_BAR_H + 10)
-	shop_top.size      = Vector2(310, 3)
-	cl.add_child(shop_top)
+	var more_sym      := Label.new()
+	more_sym.text      = "≡"
+	more_sym.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	more_sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	more_sym.position  = Vector2(more_icon_x, bar_y + 20)
+	more_sym.size      = Vector2(icon_sz, icon_sz)
+	more_sym.add_theme_font_size_override("font_size", 22)
+	more_sym.add_theme_color_override("font_color", C_TEXT)
+	_bottom_bar_cl.add_child(more_sym)
 
-	var shop_btn      := Button.new()
-	shop_btn.flat      = true
-	shop_btn.text      = "◆  SHOP"
-	shop_btn.position  = Vector2(398, SCREEN_H - BOTTOM_BAR_H + 10)
-	shop_btn.size      = Vector2(310, BOTTOM_BAR_H - 20)
-	shop_btn.pressed.connect(_on_shop_btn_pressed)
-	shop_btn.add_theme_color_override("font_color", C_GEM)
-	shop_btn.add_theme_font_size_override("font_size", 18)
-	cl.add_child(shop_btn)
+	var more_lbl      := Label.new()
+	more_lbl.text      = "MORE"
+	more_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	more_lbl.position  = Vector2(more_x, bar_y + 60)
+	more_lbl.size      = Vector2(slot_w, 24)
+	more_lbl.add_theme_font_size_override("font_size", 11)
+	more_lbl.add_theme_color_override("font_color", C_DIM)
+	_bottom_bar_cl.add_child(more_lbl)
+
+	var more_btn      := Button.new()
+	more_btn.flat      = true
+	more_btn.position  = Vector2(more_x, bar_y)
+	more_btn.size      = Vector2(slot_w, BOTTOM_BAR_H)
+	more_btn.pressed.connect(_on_menu_btn_pressed)
+	_bottom_bar_cl.add_child(more_btn)
+
+	# Build the 4 pinnable slots from saved preferences
+	_rebuild_pin_slots()
+
+
+# Clears and rebuilds the 4 dynamic pin slots from GameState.pinned_shortcuts.
+func _rebuild_pin_slots() -> void:
+	for n: Node in _pin_slot_nodes:
+		if is_instance_valid(n):
+			n.queue_free()
+	_pin_slot_nodes.clear()
+
+	var bar_y  := SCREEN_H - BOTTOM_BAR_H
+	var slot_w := SCREEN_W / 5   # 144 px
+	var icon_sz := 36
+
+	var pins: Array = GameState.pinned_shortcuts
+	for i in mini(pins.size(), 4):
+		var id: String      = pins[i]
+		var def: Dictionary = _shortcut_def(id)
+		if def.is_empty():
+			continue
+		var x        := slot_w * i
+		var icon_x   := x + (slot_w - icon_sz) / 2.0
+
+		var icon      := ColorRect.new()
+		icon.color     = _shortcut_color(id)
+		icon.position  = Vector2(icon_x, bar_y + 20)
+		icon.size      = Vector2(icon_sz, icon_sz)
+		_bottom_bar_cl.add_child(icon)
+		_pin_slot_nodes.append(icon)
+
+		var sym      := Label.new()
+		sym.text      = def["symbol"]
+		sym.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		sym.position  = Vector2(icon_x, bar_y + 20)
+		sym.size      = Vector2(icon_sz, icon_sz)
+		sym.add_theme_font_size_override("font_size", 18)
+		sym.add_theme_color_override("font_color", Color.WHITE)
+		_bottom_bar_cl.add_child(sym)
+		_pin_slot_nodes.append(sym)
+
+		var lbl      := Label.new()
+		lbl.text      = def["label"]
+		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		lbl.position  = Vector2(x, bar_y + 60)
+		lbl.size      = Vector2(slot_w, 24)
+		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_color_override("font_color", C_TEXT)
+		_bottom_bar_cl.add_child(lbl)
+		_pin_slot_nodes.append(lbl)
+
+		var btn      := Button.new()
+		btn.flat      = true
+		btn.position  = Vector2(x, bar_y)
+		btn.size      = Vector2(slot_w, BOTTOM_BAR_H)
+		btn.pressed.connect(_on_shortcut_pressed.bind(id))
+		_bottom_bar_cl.add_child(btn)
+		_pin_slot_nodes.append(btn)
 
 # ── Menu modal overlay ──────────────────────────────────────────────────────
 func _build_menu_overlay() -> void:
@@ -505,11 +848,11 @@ func _build_menu_overlay() -> void:
 	dim_btn.pressed.connect(_on_menu_close)
 	_menu_overlay.add_child(dim_btn)
 
-	# Card
-	var card_w := 680
-	var card_h := 640
-	var card_x := (SCREEN_W - card_w) / 2
-	var card_y := (SCREEN_H - card_h) / 2
+	# Card — 3×3 grid + SHOP + "Edit Quick Bar" strip at bottom
+	var card_w   := 680
+	var card_h   := 660
+	var card_x   := float(SCREEN_W - card_w) / 2.0
+	var card_y   := float(SCREEN_H - card_h) / 2.0
 
 	var card      := ColorRect.new()
 	card.color     = C_PANEL
@@ -523,24 +866,29 @@ func _build_menu_overlay() -> void:
 	card_top.size      = Vector2(card_w, 4)
 	_menu_overlay.add_child(card_top)
 
-	# Menu items: 2 columns × 4 rows
+	# Menu items: 3 columns × 3 rows (MINE + 8 shortcuts = 9)
 	var items: Array = [
-		["MINE",     C_TIMBER,   _on_menu_mine],
-		["BUILD",    C_ACCENT,   _on_menu_build],
-		["CRAFT",    C_LUMBER,   _on_menu_craft],
-		["SELL",     C_GOLD,     _on_menu_sell],
-		["CREW",     C_GREEN,    _on_menu_crew],
-		["SKYLINE",  C_STONE,    _on_menu_skyline],
-		["UPGRADES", C_XP,       _on_menu_upgrades],
+		["MINE",     C_TIMBER,  _on_menu_mine],
+		["BUILD",    C_ACCENT,  _on_menu_build],
+		["CRAFT",    C_LUMBER,  _on_menu_craft],
+		["SELL",     C_GOLD,    _on_menu_sell],
+		["CREW",     C_GREEN,   _on_menu_crew],
+		["SKYLINE",  C_STONE,   _on_menu_skyline],
+		["UPGRADES", C_XP,      _on_menu_upgrades],
+		["CONTRACT", C_GOLD,    _on_menu_contract],
+		["SHOP",     C_GEM,     _on_shop_btn_pressed],
 	]
-	var cols       := 2
-	var rows       := 4
-	var pad        := 16
-	var item_w     := (card_w - pad * (cols + 1)) / cols
-	var item_h     := (card_h - 60 - pad * (rows + 1)) / rows
+	var cols      := 3
+	var rows      := 3
+	var pad       := 16
+	# Reserve 72 px at bottom for the Edit Bar strip
+	var edit_zone := 72
+	var item_w    := float(card_w - pad * (cols + 1)) / float(cols)
+	var item_h    := float(card_h - 60 - pad * (rows + 1) - edit_zone) / float(rows)
 
 	for i in items.size():
 		var col     := i % cols
+		@warning_ignore("integer_division")
 		var row     := i / cols
 		var item_x  := card_x + pad + col * (item_w + pad)
 		var item_y  := card_y + 50 + pad + row * (item_h + pad)
@@ -570,6 +918,177 @@ func _build_menu_overlay() -> void:
 		ibtn.add_theme_font_size_override("font_size", 17)
 		_menu_overlay.add_child(ibtn)
 
+	# Edit Quick Bar strip at bottom of card
+	var edit_y := card_y + 50 + pad + float(rows) * (item_h + pad)
+
+	var edit_sep      := ColorRect.new()
+	edit_sep.color     = C_BORDER
+	edit_sep.position  = Vector2(card_x + pad, edit_y)
+	edit_sep.size      = Vector2(card_w - pad * 2, 1)
+	_menu_overlay.add_child(edit_sep)
+
+	var edit_btn      := Button.new()
+	edit_btn.flat      = true
+	edit_btn.text      = "⚙  Edit Quick Bar"
+	edit_btn.position  = Vector2(card_x + pad, edit_y + 8)
+	edit_btn.size      = Vector2(card_w - pad * 2, 48)
+	edit_btn.pressed.connect(_on_pin_edit_open)
+	edit_btn.add_theme_color_override("font_color", C_DIM)
+	edit_btn.add_theme_font_size_override("font_size", 14)
+	_menu_overlay.add_child(edit_btn)
+
+
+# ── Pin customiser panel (layer 28, between panels and menu) ────────────────
+func _build_pin_panel() -> void:
+	_pin_panel         = CanvasLayer.new()
+	_pin_panel.name    = "PinPanel"
+	_pin_panel.layer   = 28
+	_pin_panel.visible = false
+	add_child(_pin_panel)
+
+	# Dim backdrop — tap to close
+	var dim      := ColorRect.new()
+	dim.color     = Color(0, 0, 0, 0.82)
+	dim.position  = Vector2.ZERO
+	dim.size      = Vector2(SCREEN_W, SCREEN_H)
+	_pin_panel.add_child(dim)
+
+	var dim_close      := Button.new()
+	dim_close.flat      = true
+	dim_close.position  = Vector2.ZERO
+	dim_close.size      = Vector2(SCREEN_W, SCREEN_H)
+	dim_close.pressed.connect(_on_pin_edit_close)
+	_pin_panel.add_child(dim_close)
+
+	# Card
+	var card_w  := 680
+	var card_h  := 540
+	var card_x  := float(SCREEN_W - card_w) / 2.0   # 20
+	var card_y  := float(SCREEN_H - card_h) / 2.0   # 370
+
+	var card      := ColorRect.new()
+	card.color     = C_PANEL
+	card.position  = Vector2(card_x, card_y)
+	card.size      = Vector2(card_w, card_h)
+	_pin_panel.add_child(card)
+
+	# Title bar
+	var title_bar      := ColorRect.new()
+	title_bar.color     = C_ACCENT.darkened(0.65)
+	title_bar.position  = Vector2(card_x, card_y)
+	title_bar.size      = Vector2(card_w, 52)
+	_pin_panel.add_child(title_bar)
+
+	var title_lbl      := Label.new()
+	title_lbl.text      = "Customize Quick Bar"
+	title_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	title_lbl.position  = Vector2(card_x, card_y)
+	title_lbl.size      = Vector2(card_w, 52)
+	title_lbl.add_theme_font_size_override("font_size", 17)
+	title_lbl.add_theme_color_override("font_color", C_TEXT)
+	_pin_panel.add_child(title_lbl)
+
+	var hint_lbl      := Label.new()
+	hint_lbl.text      = "Tap to pin / unpin  ·  4 slots available"
+	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	hint_lbl.position  = Vector2(card_x, card_y + 52)
+	hint_lbl.size      = Vector2(card_w, 26)
+	hint_lbl.add_theme_font_size_override("font_size", 12)
+	hint_lbl.add_theme_color_override("font_color", C_DIM)
+	_pin_panel.add_child(hint_lbl)
+
+	# 4 × 2 shortcut grid  (8 shortcuts from SHORTCUT_DEFS)
+	var cols     := 4
+	var pad      := 14
+	var tile_w   := float(card_w - pad * (cols + 1)) / float(cols)   # ≈152 px
+	var tile_h   := 168.0
+	var grid_y   := card_y + 86.0   # title(52) + hint(26) + gap(8)
+
+	_pin_card_borders.clear()
+	_pin_state_labels.clear()
+
+	for i in SHORTCUT_DEFS.size():
+		var col := i % cols
+		@warning_ignore("integer_division")
+		var row := i / cols
+		var tx  := card_x + pad + col * (tile_w + pad)
+		var ty  := grid_y + row * (tile_h + pad)
+		var def: Dictionary = SHORTCUT_DEFS[i]
+
+		var border      := ColorRect.new()
+		border.color     = C_BORDER
+		border.position  = Vector2(tx - 2, ty - 2)
+		border.size      = Vector2(tile_w + 4, tile_h + 4)
+		_pin_panel.add_child(border)
+		_pin_card_borders.append(border)
+
+		var tile      := ColorRect.new()
+		tile.color     = C_CARD
+		tile.position  = Vector2(tx, ty)
+		tile.size      = Vector2(tile_w, tile_h)
+		_pin_panel.add_child(tile)
+
+		var icon_sz  := 48
+		var icon_x   := tx + (tile_w - icon_sz) / 2.0
+
+		var icon      := ColorRect.new()
+		icon.color     = _shortcut_color(def["id"])
+		icon.position  = Vector2(icon_x, ty + 14)
+		icon.size      = Vector2(icon_sz, icon_sz)
+		_pin_panel.add_child(icon)
+
+		var sym      := Label.new()
+		sym.text      = def["symbol"]
+		sym.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		sym.position  = Vector2(icon_x, ty + 14)
+		sym.size      = Vector2(icon_sz, icon_sz)
+		sym.add_theme_font_size_override("font_size", 22)
+		sym.add_theme_color_override("font_color", Color.WHITE)
+		_pin_panel.add_child(sym)
+
+		var name_lbl      := Label.new()
+		name_lbl.text      = def["label"]
+		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		name_lbl.position  = Vector2(tx, ty + 70)
+		name_lbl.size      = Vector2(tile_w, 22)
+		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_color_override("font_color", C_TEXT)
+		_pin_panel.add_child(name_lbl)
+
+		var pin_lbl      := Label.new()
+		pin_lbl.text      = ""
+		pin_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		pin_lbl.position  = Vector2(tx, ty + 96)
+		pin_lbl.size      = Vector2(tile_w, 20)
+		pin_lbl.add_theme_font_size_override("font_size", 10)
+		pin_lbl.add_theme_color_override("font_color", C_GREEN)
+		_pin_panel.add_child(pin_lbl)
+		_pin_state_labels.append(pin_lbl)
+
+		var tile_btn      := Button.new()
+		tile_btn.flat      = true
+		tile_btn.position  = Vector2(tx, ty)
+		tile_btn.size      = Vector2(tile_w, tile_h)
+		tile_btn.pressed.connect(_on_pin_toggle.bind(def["id"]))
+		_pin_panel.add_child(tile_btn)
+
+	# DONE button
+	var done_y   := grid_y + 2.0 * tile_h + pad + 12.0
+
+	var done_btn      := Button.new()
+	done_btn.text      = "DONE"
+	done_btn.position  = Vector2(card_x + 20, done_y)
+	done_btn.size      = Vector2(card_w - 40, 48)
+	done_btn.add_theme_font_size_override("font_size", 16)
+	done_btn.pressed.connect(_on_pin_edit_close)
+	_apply_btn_style(done_btn, C_ACCENT.darkened(0.35))
+	_pin_panel.add_child(done_btn)
+
+	_update_pin_panel_state()
+
+
 # ── Build panel ─────────────────────────────────────────────────────────────
 func _build_build_panel() -> void:
 	_build_panel         = CanvasLayer.new()
@@ -584,37 +1103,8 @@ func _build_build_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_build_panel.add_child(bg)
 
-	# Header
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_build_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_ACCENT
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_build_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "BUILD"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_build_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_build_panel, "BUILD", C_ACCENT)
 	close_btn.pressed.connect(_on_build_close)
-	_build_panel.add_child(close_btn)
 
 	# Stage name label
 	_lbl_build_stage                      = Label.new()
@@ -668,7 +1158,7 @@ func _build_build_panel() -> void:
 	_btn_start_stage.position = Vector2(20, 780)
 	_btn_start_stage.size     = Vector2(SCREEN_W - 40, 66)
 	_btn_start_stage.pressed.connect(_on_start_stage_pressed)
-	_btn_start_stage.add_theme_color_override("font_color", C_GREEN)
+	_apply_btn_style(_btn_start_stage, C_GREEN.darkened(0.35))
 	_build_panel.add_child(_btn_start_stage)
 
 	_lbl_cant_start                      = Label.new()
@@ -756,36 +1246,8 @@ func _build_crew_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_crew_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_crew_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_ACCENT
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_crew_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "CREW"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_crew_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_crew_panel, "CREW", C_ACCENT)
 	close_btn.pressed.connect(_on_crew_close)
-	_crew_panel.add_child(close_btn)
 
 	_lbl_crew_bp                      = Label.new()
 	_lbl_crew_bp.text                  = "Build Power: 0"
@@ -879,7 +1341,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	hire_btn.position = Vector2(326, card_y + 88)
 	hire_btn.size     = Vector2(350, 50)
 	hire_btn.pressed.connect(_on_hire_pressed.bind(template.id))
-	hire_btn.add_theme_color_override("font_color", C_GREEN)
+	_apply_btn_style(hire_btn, C_GREEN.darkened(0.35))
 	_crew_panel.add_child(hire_btn)
 	_crew_hire_btns.append(hire_btn)
 
@@ -890,7 +1352,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	lvlup_btn.size     = Vector2(350, 50)
 	lvlup_btn.visible  = false
 	lvlup_btn.pressed.connect(_on_levelup_pressed.bind(template.id))
-	lvlup_btn.add_theme_color_override("font_color", C_GOLD)
+	_apply_btn_style(lvlup_btn, C_GOLD.darkened(0.50), Color(0.12, 0.10, 0.02))
 	_crew_panel.add_child(lvlup_btn)
 	_crew_levelup_btns.append(lvlup_btn)
 
@@ -922,136 +1384,168 @@ func _build_craft_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_craft_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_craft_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_LUMBER
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_craft_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "WORKSHOP"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_craft_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_craft_panel, "WORKSHOP", C_LUMBER)
 	close_btn.pressed.connect(_on_craft_close)
-	_craft_panel.add_child(close_btn)
 
-	# Inventory summary
+	# Inventory grid: 4 rows × 4 columns
+	# Rows 1-2 = raw materials, Rows 3-4 = refined
 	var inv_bg      := ColorRect.new()
 	inv_bg.color     = C_CARD
 	inv_bg.position  = Vector2(14, 88)
-	inv_bg.size      = Vector2(SCREEN_W - 28, 68)
+	inv_bg.size      = Vector2(SCREEN_W - 28, 258)
 	_craft_panel.add_child(inv_bg)
 
 	var inv_title     := Label.new()
 	inv_title.text     = "Inventory"
 	inv_title.position = Vector2(28, 92)
-	inv_title.size     = Vector2(200, 26)
+	inv_title.size     = Vector2(200, 22)
 	inv_title.add_theme_color_override("font_color", C_DIM)
+	inv_title.add_theme_font_size_override("font_size", 12)
 	_craft_panel.add_child(inv_title)
 
+	# 16 materials: 8 raw (rows 1-2), 8 refined (rows 3-4)
 	var inv_defs: Array = [
-		["Timber",   C_TIMBER  ],
-		["Stone",    C_STONE   ],
-		["Lumber",   C_LUMBER  ],
-		["Concrete", C_CONCRETE],
+		["Timber",      C_TIMBER,     ],
+		["Stone",       C_STONE,      ],
+		["Sand",        C_SAND,       ],
+		["Steel Ore",   C_STEEL_ORE,  ],
+		["Clay",        C_CLAY,       ],
+		["Copper Ore",  C_COPPER_ORE, ],
+		["Limestone",   C_LIMESTONE,  ],
+		["Bauxite",     C_BAUXITE,    ],
+		["Lumber",      C_LUMBER,     ],
+		["Concrete",    C_CONCRETE,   ],
+		["Glass",       C_GLASS,      ],
+		["Steel Beam",  C_STEEL_BEAM, ],
+		["Brick",       C_BRICK,      ],
+		["Copper Pipe", C_COPPER_PIPE,],
+		["Plaster",     C_PLASTER,    ],
+		["Aluminium",   C_ALUMINIUM,  ],
 	]
 	var inv_cell_w := float(SCREEN_W - 28) / 4.0
 	for i in inv_defs.size():
+		var row_y: int
+		if   i < 4:  row_y = 112
+		elif i < 8:  row_y = 164
+		elif i < 12: row_y = 224
+		else:        row_y = 276
+		var col   := i % 4
 		var lbl     := Label.new()
 		lbl.text     = "%s\n0" % inv_defs[i][0]
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		lbl.position = Vector2(14 + i * inv_cell_w, 96)
-		lbl.size     = Vector2(inv_cell_w, 56)
+		lbl.position = Vector2(14 + col * inv_cell_w, row_y)
+		lbl.size     = Vector2(inv_cell_w, 48)
+		lbl.add_theme_font_size_override("font_size", 11)
 		lbl.add_theme_color_override("font_color", inv_defs[i][1] as Color)
 		_craft_panel.add_child(lbl)
 		_craft_inv_lbls.append(lbl)
 
-	# Recipe cards
+	# Dividers inside inventory box
+	for sep_y: int in [160, 220, 272]:
+		var row_sep      := ColorRect.new()
+		row_sep.color     = C_BORDER
+		row_sep.position  = Vector2(14, sep_y)
+		row_sep.size      = Vector2(SCREEN_W - 28, 1)
+		_craft_panel.add_child(row_sep)
+	# Thicker divider between raw and refined groups
+	var grp_sep      := ColorRect.new()
+	grp_sep.color     = C_ACCENT.darkened(0.5)
+	grp_sep.position  = Vector2(14, 216)
+	grp_sep.size      = Vector2(SCREEN_W - 28, 3)
+	_craft_panel.add_child(grp_sep)
+
+	# Separator before recipe scroll
+	var div      := ColorRect.new()
+	div.color     = C_BORDER
+	div.position  = Vector2(0, 352)
+	div.size      = Vector2(SCREEN_W, 2)
+	_craft_panel.add_child(div)
+
+	# Recipe cards in ScrollContainer
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, 358)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 358)
+	_craft_panel.add_child(scroll)
+
+	var vbox      := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	scroll.add_child(vbox)
+
 	var recipes: Array = [
-		["timber", "lumber",   3, C_LUMBER,   "Lumber",   "Timber"],
-		["stone",  "concrete", 3, C_CONCRETE, "Concrete", "Stone"],
+		["timber",     "lumber",      3, C_LUMBER,      "Lumber",      "Timber"    ],
+		["stone",      "concrete",    3, C_CONCRETE,    "Concrete",    "Stone"     ],
+		["sand",       "glass",       3, C_GLASS,       "Glass",       "Sand"      ],
+		["steel_ore",  "steel_beam",  3, C_STEEL_BEAM,  "Steel Beam",  "Steel Ore" ],
+		["clay",       "brick",       3, C_BRICK,       "Brick",       "Clay"      ],
+		["copper_ore", "copper_pipe", 3, C_COPPER_PIPE, "Copper Pipe", "Copper Ore"],
+		["limestone",  "plaster",     3, C_PLASTER,     "Plaster",     "Limestone" ],
+		["bauxite",    "aluminium",   3, C_ALUMINIUM,   "Aluminium",   "Bauxite"   ],
 	]
-	for ri in recipes.size():
-		var r: Array   = recipes[ri]
-		var raw_id:    String = r[0]
-		var ref_id:    String = r[1]
-		var cost:      int    = r[2]
-		var accent:    Color  = r[3]
-		var ref_name:  String = r[4]
-		var raw_name:  String = r[5]
-		var card_y     := 172 + ri * 230
+	for r: Array in recipes:
+		var raw_id:   String = r[0]
+		var ref_id:   String = r[1]
+		var cost:     int    = r[2]
+		var accent:   Color  = r[3]
+		var ref_name: String = r[4]
+		var raw_name: String = r[5]
 
 		var card      := ColorRect.new()
 		card.color     = C_CARD
-		card.position  = Vector2(14, card_y)
-		card.size      = Vector2(SCREEN_W - 28, 212)
-		_craft_panel.add_child(card)
+		card.custom_minimum_size = Vector2(SCREEN_W, 210)
+		vbox.add_child(card)
 
 		var left_bar      := ColorRect.new()
 		left_bar.color     = accent
-		left_bar.position  = Vector2(14, card_y)
-		left_bar.size      = Vector2(5, 212)
-		_craft_panel.add_child(left_bar)
+		left_bar.position  = Vector2(0, 0)
+		left_bar.size      = Vector2(5, 210)
+		card.add_child(left_bar)
 
 		var ref_lbl     := Label.new()
 		ref_lbl.text     = ref_name
-		ref_lbl.position = Vector2(28, card_y + 12)
+		ref_lbl.position = Vector2(18, 12)
 		ref_lbl.size     = Vector2(400, 36)
 		ref_lbl.add_theme_font_size_override("font_size", 20)
 		ref_lbl.add_theme_color_override("font_color", accent)
-		_craft_panel.add_child(ref_lbl)
+		card.add_child(ref_lbl)
 
 		var recipe_lbl     := Label.new()
 		recipe_lbl.text     = "%d %s  →  1 %s" % [cost, raw_name, ref_name]
-		recipe_lbl.position = Vector2(28, card_y + 54)
-		recipe_lbl.size     = Vector2(SCREEN_W - 56, 28)
+		recipe_lbl.position = Vector2(18, 54)
+		recipe_lbl.size     = Vector2(SCREEN_W - 36, 28)
 		recipe_lbl.add_theme_color_override("font_color", C_DIM)
-		_craft_panel.add_child(recipe_lbl)
+		card.add_child(recipe_lbl)
 
 		var yield_lbl     := Label.new()
 		yield_lbl.text     = "Will make: 0"
-		yield_lbl.position = Vector2(28, card_y + 90)
-		yield_lbl.size     = Vector2(SCREEN_W - 56, 28)
+		yield_lbl.position = Vector2(18, 90)
+		yield_lbl.size     = Vector2(SCREEN_W - 36, 28)
 		yield_lbl.add_theme_color_override("font_color", C_TEXT)
-		_craft_panel.add_child(yield_lbl)
+		card.add_child(yield_lbl)
 		_craft_yield_lbls.append(yield_lbl)
 
 		var btn1     := Button.new()
 		btn1.text     = "Craft 1"
-		btn1.position = Vector2(28, card_y + 130)
+		btn1.position = Vector2(18, 130)
 		btn1.size     = Vector2(200, 62)
 		btn1.pressed.connect(_on_craft_one.bind(raw_id, ref_id, cost))
-		btn1.add_theme_color_override("font_color", accent)
-		_craft_panel.add_child(btn1)
+		_apply_btn_style(btn1, accent.darkened(0.50))
+		card.add_child(btn1)
 		_craft1_btns.append(btn1)
 
 		var btn_all     := Button.new()
 		btn_all.text     = "Craft All"
-		btn_all.position = Vector2(248, card_y + 130)
-		btn_all.size     = Vector2(448, 62)
+		btn_all.position = Vector2(234, 130)
+		btn_all.size     = Vector2(SCREEN_W - 252, 62)
 		btn_all.pressed.connect(_on_craft_all.bind(raw_id, ref_id, cost))
-		btn_all.add_theme_color_override("font_color", C_GREEN)
-		_craft_panel.add_child(btn_all)
+		_apply_btn_style(btn_all, C_GREEN.darkened(0.35))
+		card.add_child(btn_all)
 		_craftall_btns.append(btn_all)
+
+		var sep      := ColorRect.new()
+		sep.color     = C_BORDER
+		sep.custom_minimum_size = Vector2(SCREEN_W, 2)
+		vbox.add_child(sep)
 
 # ── Wall panel ──────────────────────────────────────────────────────────────
 func _build_wall_panel() -> void:
@@ -1101,14 +1595,15 @@ func _build_wall_panel() -> void:
 	keep_btn.position = Vector2(56, 660)
 	keep_btn.size     = Vector2(280, 60)
 	keep_btn.pressed.connect(_on_wall_keep_pressed)
+	_apply_btn_style(keep_btn, Color(0.18, 0.20, 0.32))
 	_wall_panel.add_child(keep_btn)
 
 	var crew_btn     := Button.new()
 	crew_btn.text     = "Open Crew ->"
 	crew_btn.position = Vector2(384, 660)
 	crew_btn.size     = Vector2(280, 60)
-	crew_btn.add_theme_color_override("font_color", C_GREEN)
 	crew_btn.pressed.connect(_on_wall_crew_pressed)
+	_apply_btn_style(crew_btn, C_GREEN.darkened(0.35))
 	_wall_panel.add_child(crew_btn)
 
 # ── Skyline overlay panel ───────────────────────────────────────────────────
@@ -1125,36 +1620,8 @@ func _build_skyline_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_skyline_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_skyline_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_GOLD
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_skyline_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "SKYLINE"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_skyline_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_skyline_panel, "SKYLINE", C_GOLD)
 	close_btn.pressed.connect(_on_skyline_close)
-	_skyline_panel.add_child(close_btn)
 
 	var sub      := Label.new()
 	sub.text      = "All completed buildings:"
@@ -1166,7 +1633,7 @@ func _build_skyline_panel() -> void:
 
 	var scroll      := ScrollContainer.new()
 	scroll.position  = Vector2(0, 128)
-	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 128)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 128 - 90)
 	_skyline_panel.add_child(scroll)
 
 	_skyline_list_box          = VBoxContainer.new()
@@ -1174,13 +1641,37 @@ func _build_skyline_panel() -> void:
 	_skyline_list_box.size     = Vector2(SCREEN_W, 0)
 	scroll.add_child(_skyline_list_box)
 
+	# "New Contract" footer
+	var nc_sep      := ColorRect.new()
+	nc_sep.color     = C_BORDER
+	nc_sep.position  = Vector2(0, SCREEN_H - BOTTOM_BAR_H - 90)
+	nc_sep.size      = Vector2(SCREEN_W, 2)
+	_skyline_panel.add_child(nc_sep)
+
+	_btn_new_contract          = Button.new()
+	_btn_new_contract.position = Vector2(60, SCREEN_H - BOTTOM_BAR_H - 84)
+	_btn_new_contract.size     = Vector2(SCREEN_W - 120, 76)
+	_btn_new_contract.add_theme_font_size_override("font_size", 17)
+	_btn_new_contract.pressed.connect(_on_new_contract_pressed)
+	_apply_btn_style(_btn_new_contract, C_GREEN.darkened(0.35))
+	_skyline_panel.add_child(_btn_new_contract)
+
+	_lbl_new_contract_locked          = Label.new()
+	_lbl_new_contract_locked.text     = "Reach Level 10 to sign a New Contract"
+	_lbl_new_contract_locked.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_new_contract_locked.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_new_contract_locked.position = Vector2(60, SCREEN_H - BOTTOM_BAR_H - 84)
+	_lbl_new_contract_locked.size     = Vector2(SCREEN_W - 120, 76)
+	_lbl_new_contract_locked.add_theme_color_override("font_color", C_DIM)
+	_skyline_panel.add_child(_lbl_new_contract_locked)
+
 # ── Sell overlay panel ─────────────────────────────────────────────────────
-## Sell prices (cash per unit)
+## Sell prices (cash per unit) — raw materials cheap, refined profitable
 const SELL_PRICES: Dictionary = {
-	"timber":   1,
-	"stone":    1,
-	"lumber":   4,
-	"concrete": 4,
+	"timber":      1, "stone":       1, "sand":        1, "steel_ore":   2,
+	"clay":        2, "copper_ore":  2, "limestone":   2, "bauxite":     3,
+	"lumber":      4, "concrete":    4, "glass":       6, "steel_beam":  8,
+	"brick":       6, "copper_pipe": 8, "plaster":     6, "aluminium":  10,
 }
 
 func _build_sell_panel() -> void:
@@ -1196,121 +1687,119 @@ func _build_sell_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_sell_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_sell_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_GOLD
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_sell_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "SELL"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_sell_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_sell_panel, "SELL", C_GOLD)
 	close_btn.pressed.connect(_on_sell_close)
-	_sell_panel.add_child(close_btn)
 
 	var sub      := Label.new()
-	sub.text      = "Raw materials sell for less than refined — craft first for more cash."
+	sub.text      = "Raw materials sell for less — craft first for more cash."
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
 	sub.position  = Vector2(20, 84)
-	sub.size      = Vector2(SCREEN_W - 40, 40)
+	sub.size      = Vector2(SCREEN_W - 40, 36)
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", C_DIM)
 	_sell_panel.add_child(sub)
 
-	# One card per sellable material
+	# All 8 materials in a scrollable VBox (compact cards)
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, 128)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 128)
+	_sell_panel.add_child(scroll)
+
+	var vbox      := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	scroll.add_child(vbox)
+
 	var mat_defs: Array = [
-		["timber",   "Timber",   C_TIMBER  ],
-		["stone",    "Stone",    C_STONE   ],
-		["lumber",   "Lumber",   C_LUMBER  ],
-		["concrete", "Concrete", C_CONCRETE],
+		["timber",     "Timber",     C_TIMBER,     ],
+		["stone",      "Stone",      C_STONE,      ],
+		["sand",       "Sand",       C_SAND,       ],
+		["steel_ore",  "Steel Ore",  C_STEEL_ORE,  ],
+		["clay",       "Clay",       C_CLAY,       ],
+		["copper_ore", "Copper Ore", C_COPPER_ORE, ],
+		["limestone",  "Limestone",  C_LIMESTONE,  ],
+		["bauxite",    "Bauxite",    C_BAUXITE,    ],
+		["lumber",     "Lumber",     C_LUMBER,     ],
+		["concrete",   "Concrete",   C_CONCRETE,   ],
+		["glass",      "Glass",      C_GLASS,      ],
+		["steel_beam", "Steel Beam", C_STEEL_BEAM, ],
+		["brick",      "Brick",      C_BRICK,      ],
+		["copper_pipe","Copper Pipe",C_COPPER_PIPE,],
+		["plaster",    "Plaster",    C_PLASTER,    ],
+		["aluminium",  "Aluminium",  C_ALUMINIUM,  ],
 	]
 
-	for i in mat_defs.size():
-		var mid: String   = mat_defs[i][0]
-		var mname: String = mat_defs[i][1]
-		var accent: Color = mat_defs[i][2]
+	for md: Array in mat_defs:
+		var mid: String   = md[0]
+		var mname: String = md[1]
+		var accent: Color = md[2]
 		var price: int    = int(SELL_PRICES.get(mid, 1))
-		var card_y        := 136 + i * 220
 
 		var card      := ColorRect.new()
 		card.color     = C_CARD
-		card.position  = Vector2(14, card_y)
-		card.size      = Vector2(SCREEN_W - 28, 204)
-		_sell_panel.add_child(card)
+		card.custom_minimum_size = Vector2(SCREEN_W, 130)
+		vbox.add_child(card)
 
 		var left_bar      := ColorRect.new()
 		left_bar.color     = accent
-		left_bar.position  = Vector2(14, card_y)
-		left_bar.size      = Vector2(5, 204)
-		_sell_panel.add_child(left_bar)
+		left_bar.position  = Vector2(0, 0)
+		left_bar.size      = Vector2(5, 130)
+		card.add_child(left_bar)
 
-		# Material name + price badge
 		var name_lbl     := Label.new()
 		name_lbl.text     = mname
-		name_lbl.position = Vector2(28, card_y + 12)
-		name_lbl.size     = Vector2(360, 36)
-		name_lbl.add_theme_font_size_override("font_size", 20)
+		name_lbl.position = Vector2(18, 10)
+		name_lbl.size     = Vector2(320, 32)
+		name_lbl.add_theme_font_size_override("font_size", 18)
 		name_lbl.add_theme_color_override("font_color", accent)
-		_sell_panel.add_child(name_lbl)
+		card.add_child(name_lbl)
 
 		var price_lbl     := Label.new()
 		price_lbl.text     = "$ %d / unit" % price
 		price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		price_lbl.position = Vector2(400, card_y + 16)
-		price_lbl.size     = Vector2(292, 28)
+		price_lbl.position = Vector2(360, 14)
+		price_lbl.size     = Vector2(340, 24)
+		price_lbl.add_theme_font_size_override("font_size", 13)
 		price_lbl.add_theme_color_override("font_color", C_GOLD)
-		_sell_panel.add_child(price_lbl)
+		card.add_child(price_lbl)
 
-		# Stock + earnings preview
 		var inv_lbl     := Label.new()
 		inv_lbl.text     = "Have: 0"
-		inv_lbl.position = Vector2(28, card_y + 54)
-		inv_lbl.size     = Vector2(300, 28)
+		inv_lbl.position = Vector2(18, 46)
+		inv_lbl.size     = Vector2(280, 26)
+		inv_lbl.add_theme_font_size_override("font_size", 13)
 		inv_lbl.add_theme_color_override("font_color", C_DIM)
-		_sell_panel.add_child(inv_lbl)
+		card.add_child(inv_lbl)
 		_sell_inv_lbls.append(inv_lbl)
 
 		var earn_lbl     := Label.new()
 		earn_lbl.text     = "= $ 0"
 		earn_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		earn_lbl.position = Vector2(400, card_y + 54)
-		earn_lbl.size     = Vector2(292, 28)
+		earn_lbl.position = Vector2(360, 46)
+		earn_lbl.size     = Vector2(340, 26)
+		earn_lbl.add_theme_font_size_override("font_size", 13)
 		earn_lbl.add_theme_color_override("font_color", C_GOLD)
-		_sell_panel.add_child(earn_lbl)
+		card.add_child(earn_lbl)
 		_sell_earn_lbls.append(earn_lbl)
 
-		# Sell buttons
-		var btn_defs: Array = [["Sell 1", 1], ["Sell 10", 10], ["Sell All", -1]]
+		# Three sell buttons
+		var btn_defs: Array  = [["Sell 1", 1], ["Sell 10", 10], ["Sell All", -1]]
+		var btn_bgs:  Array  = [Color(0.18, 0.22, 0.36), Color(0.24, 0.30, 0.46), Color(0.52, 0.14, 0.14)]
+		var btn_w := (SCREEN_W - 18 * 2 - 8 * 2) / 3.0
 		for bi in btn_defs.size():
-			var btn_label: String = btn_defs[bi][0]
-			var qty: int          = int(btn_defs[bi][1])
-			var btn      := Button.new()
-			btn.text      = btn_label
-			btn.position  = Vector2(14 + bi * 232, card_y + 98)
-			btn.size      = Vector2(220, 88)
-			btn.pressed.connect(_on_sell_pressed.bind(mid, qty))
-			btn.add_theme_color_override("font_color", C_GOLD)
-			_sell_panel.add_child(btn)
+			var btn     := Button.new()
+			btn.text     = btn_defs[bi][0]
+			btn.position = Vector2(18 + bi * (btn_w + 8), 80)
+			btn.size     = Vector2(btn_w, 40)
+			btn.pressed.connect(_on_sell_pressed.bind(mid, int(btn_defs[bi][1])))
+			btn.add_theme_font_size_override("font_size", 13)
+			_apply_btn_style(btn, btn_bgs[bi])
+			card.add_child(btn)
+
+		var sep      := ColorRect.new()
+		sep.color     = C_BORDER
+		sep.custom_minimum_size = Vector2(SCREEN_W, 2)
+		vbox.add_child(sep)
 
 # ── Upgrades overlay panel ─────────────────────────────────────────────────
 func _build_upgrades_panel() -> void:
@@ -1326,36 +1815,8 @@ func _build_upgrades_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_upgrades_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_upgrades_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_XP
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_upgrades_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "UPGRADES"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_upgrades_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_upgrades_panel, "UPGRADES", C_XP)
 	close_btn.pressed.connect(_on_upgrades_close)
-	_upgrades_panel.add_child(close_btn)
 
 	var sub      := Label.new()
 	sub.text      = "Unlocked by player level  ·  costs multiply ×2 per level"
@@ -1451,8 +1912,8 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	btn.text     = "Buy"
 	btn.position = Vector2(530, 70)
 	btn.size     = Vector2(168, 52)
-	btn.add_theme_color_override("font_color", accent)
 	btn.pressed.connect(_on_upgrade_buy.bind(u["id"]))
+	_apply_btn_style(btn, accent.darkened(0.50))
 	outer.add_child(btn)
 
 	# Spacer line between cards
@@ -1471,6 +1932,378 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 		"btn":        btn,
 	}
 
+# ── Contract panel ─────────────────────────────────────────────────────────
+func _build_contract_panel() -> void:
+	_contract_panel         = CanvasLayer.new()
+	_contract_panel.name    = "ContractPanel"
+	_contract_panel.layer   = 20
+	_contract_panel.visible = false
+	add_child(_contract_panel)
+
+	var bg      := ColorRect.new()
+	bg.color     = C_PANEL
+	bg.position  = Vector2.ZERO
+	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
+	_contract_panel.add_child(bg)
+
+	var close_btn := _build_panel_header(_contract_panel, "CONTRACT", C_GOLD)
+	close_btn.pressed.connect(_on_contract_close)
+
+	# Rep balance chip
+	var rep_bg      := ColorRect.new()
+	rep_bg.color     = C_CARD
+	rep_bg.position  = Vector2(16, 88)
+	rep_bg.size      = Vector2(SCREEN_W - 32, 52)
+	_contract_panel.add_child(rep_bg)
+
+	var rep_bar      := ColorRect.new()
+	rep_bar.color     = C_GOLD
+	rep_bar.position  = Vector2(16, 88)
+	rep_bar.size      = Vector2(SCREEN_W - 32, 3)
+	_contract_panel.add_child(rep_bar)
+
+	_lbl_contract_rep = Label.new()
+	_lbl_contract_rep.text      = "Reputation Points: 0 RP"
+	_lbl_contract_rep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_contract_rep.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_contract_rep.position  = Vector2(16, 88)
+	_lbl_contract_rep.size      = Vector2(SCREEN_W - 32, 52)
+	_lbl_contract_rep.add_theme_color_override("font_color", C_GOLD)
+	_lbl_contract_rep.add_theme_font_size_override("font_size", 18)
+	_contract_panel.add_child(_lbl_contract_rep)
+
+	# Scrollable body (artifacts + portfolio)
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, 148)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 148)
+	_contract_panel.add_child(scroll)
+
+	var vbox      := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	scroll.add_child(vbox)
+
+	# ARTIFACTS section
+	var art_hdr      := Label.new()
+	art_hdr.text      = "ARTIFACTS"
+	art_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	art_hdr.custom_minimum_size  = Vector2(SCREEN_W, 48)
+	art_hdr.add_theme_color_override("font_color", C_GOLD)
+	art_hdr.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(art_hdr)
+
+	_artifact_cards = []
+	for a: Dictionary in ArtifactDatabase.get_all():
+		var card_dict := _build_artifact_card(vbox, a)
+		_artifact_cards.append(card_dict)
+
+	# Separator
+	var sep_ctrl      := Control.new()
+	sep_ctrl.custom_minimum_size = Vector2(0, 12)
+	vbox.add_child(sep_ctrl)
+
+	var sep_line      := ColorRect.new()
+	sep_line.color     = C_BORDER
+	sep_line.custom_minimum_size = Vector2(SCREEN_W, 2)
+	vbox.add_child(sep_line)
+
+	var sep_ctrl2      := Control.new()
+	sep_ctrl2.custom_minimum_size = Vector2(0, 8)
+	vbox.add_child(sep_ctrl2)
+
+	# PORTFOLIO section
+	var port_hdr      := Label.new()
+	port_hdr.text      = "PORTFOLIO  (all-time builds)"
+	port_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	port_hdr.custom_minimum_size  = Vector2(SCREEN_W, 48)
+	port_hdr.add_theme_color_override("font_color", C_DIM)
+	port_hdr.add_theme_font_size_override("font_size", 16)
+	vbox.add_child(port_hdr)
+
+	_portfolio_list_box      = VBoxContainer.new()
+	_portfolio_list_box.custom_minimum_size = Vector2(SCREEN_W, 0)
+	vbox.add_child(_portfolio_list_box)
+
+	var bottom_sp      := Control.new()
+	bottom_sp.custom_minimum_size = Vector2(0, 32)
+	vbox.add_child(bottom_sp)
+
+func _build_artifact_card(parent: VBoxContainer, a: Dictionary) -> Dictionary:
+	var aid: String = a["id"]
+
+	var outer      := ColorRect.new()
+	outer.color     = C_CARD
+	outer.custom_minimum_size = Vector2(SCREEN_W, 130)
+	parent.add_child(outer)
+
+	var left_bar      := ColorRect.new()
+	left_bar.color     = C_GOLD
+	left_bar.position  = Vector2(0, 0)
+	left_bar.size      = Vector2(5, 130)
+	outer.add_child(left_bar)
+
+	var name_lbl     := Label.new()
+	name_lbl.text     = a["name"]
+	name_lbl.position = Vector2(18, 10)
+	name_lbl.size     = Vector2(440, 34)
+	name_lbl.add_theme_font_size_override("font_size", 17)
+	name_lbl.add_theme_color_override("font_color", C_GOLD)
+	outer.add_child(name_lbl)
+
+	var desc_lbl     := Label.new()
+	desc_lbl.text     = a["description"]
+	desc_lbl.position = Vector2(18, 46)
+	desc_lbl.size     = Vector2(440, 28)
+	desc_lbl.add_theme_font_size_override("font_size", 13)
+	desc_lbl.add_theme_color_override("font_color", C_DIM)
+	outer.add_child(desc_lbl)
+
+	var level_lbl     := Label.new()
+	level_lbl.text     = "Level 0 / %d" % int(a["max_level"])
+	level_lbl.position = Vector2(18, 78)
+	level_lbl.size     = Vector2(220, 28)
+	level_lbl.add_theme_color_override("font_color", C_TEXT)
+	outer.add_child(level_lbl)
+
+	var cost_lbl     := Label.new()
+	cost_lbl.text     = "Cost: 1 RP"
+	cost_lbl.position = Vector2(242, 78)
+	cost_lbl.size     = Vector2(220, 28)
+	cost_lbl.add_theme_font_size_override("font_size", 13)
+	cost_lbl.add_theme_color_override("font_color", C_GOLD)
+	outer.add_child(cost_lbl)
+
+	var btn     := Button.new()
+	btn.text     = "Buy"
+	btn.position = Vector2(524, 68)
+	btn.size     = Vector2(184, 56)
+	btn.pressed.connect(_on_artifact_buy.bind(aid))
+	_apply_btn_style(btn, C_GOLD.darkened(0.52))
+	outer.add_child(btn)
+
+	var sep      := ColorRect.new()
+	sep.color     = C_BORDER
+	sep.custom_minimum_size = Vector2(SCREEN_W, 2)
+	parent.add_child(sep)
+
+	return {
+		"id":        aid,
+		"outer":     outer,
+		"name_lbl":  name_lbl,
+		"level_lbl": level_lbl,
+		"cost_lbl":  cost_lbl,
+		"btn":       btn,
+	}
+
+# ── Prestige confirm panel ──────────────────────────────────────────────────
+func _build_prestige_confirm_panel() -> void:
+	_prestige_confirm_panel         = CanvasLayer.new()
+	_prestige_confirm_panel.name    = "PrestigeConfirmPanel"
+	_prestige_confirm_panel.layer   = 35
+	_prestige_confirm_panel.visible = false
+	add_child(_prestige_confirm_panel)
+
+	# Dark overlay
+	var dim      := ColorRect.new()
+	dim.color     = Color(0, 0, 0, 0.80)
+	dim.position  = Vector2.ZERO
+	dim.size      = Vector2(SCREEN_W, SCREEN_H)
+	_prestige_confirm_panel.add_child(dim)
+
+	# Card
+	var card_w := 660
+	var card_h := 560
+	var card_x := (SCREEN_W - card_w) / 2
+	var card_y := (SCREEN_H - card_h) / 2
+
+	var card      := ColorRect.new()
+	card.color     = C_PANEL
+	card.position  = Vector2(card_x, card_y)
+	card.size      = Vector2(card_w, card_h)
+	_prestige_confirm_panel.add_child(card)
+
+	var card_top      := ColorRect.new()
+	card_top.color     = C_GREEN
+	card_top.position  = Vector2(card_x, card_y)
+	card_top.size      = Vector2(card_w, 4)
+	_prestige_confirm_panel.add_child(card_top)
+
+	# Title
+	var title      := Label.new()
+	title.text      = "SIGN NEW CONTRACT?"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position  = Vector2(card_x, card_y + 18)
+	title.size      = Vector2(card_w, 48)
+	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_color_override("font_color", C_TEXT)
+	_prestige_confirm_panel.add_child(title)
+
+	var sub      := Label.new()
+	sub.text      = "You'll move on to your next project."
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.position  = Vector2(card_x, card_y + 66)
+	sub.size      = Vector2(card_w, 30)
+	sub.add_theme_font_size_override("font_size", 14)
+	sub.add_theme_color_override("font_color", C_DIM)
+	_prestige_confirm_panel.add_child(sub)
+
+	# Separator
+	var sep1      := ColorRect.new()
+	sep1.color     = C_BORDER
+	sep1.position  = Vector2(card_x + 20, card_y + 104)
+	sep1.size      = Vector2(card_w - 40, 2)
+	_prestige_confirm_panel.add_child(sep1)
+
+	# Rep earned
+	_lbl_prestige_rep_earned = Label.new()
+	_lbl_prestige_rep_earned.text      = "+0 Reputation Points"
+	_lbl_prestige_rep_earned.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_prestige_rep_earned.position  = Vector2(card_x, card_y + 116)
+	_lbl_prestige_rep_earned.size      = Vector2(card_w, 38)
+	_lbl_prestige_rep_earned.add_theme_font_size_override("font_size", 22)
+	_lbl_prestige_rep_earned.add_theme_color_override("font_color", C_GOLD)
+	_prestige_confirm_panel.add_child(_lbl_prestige_rep_earned)
+
+	_lbl_prestige_new_rep = Label.new()
+	_lbl_prestige_new_rep.text      = "New total: 0 RP"
+	_lbl_prestige_new_rep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_prestige_new_rep.position  = Vector2(card_x, card_y + 158)
+	_lbl_prestige_new_rep.size      = Vector2(card_w, 28)
+	_lbl_prestige_new_rep.add_theme_font_size_override("font_size", 14)
+	_lbl_prestige_new_rep.add_theme_color_override("font_color", C_DIM)
+	_prestige_confirm_panel.add_child(_lbl_prestige_new_rep)
+
+	# Separator
+	var sep2      := ColorRect.new()
+	sep2.color     = C_BORDER
+	sep2.position  = Vector2(card_x + 20, card_y + 196)
+	sep2.size      = Vector2(card_w - 40, 2)
+	_prestige_confirm_panel.add_child(sep2)
+
+	# Resets / keeps labels
+	var resets_lbl      := Label.new()
+	resets_lbl.text      = "RESETS:"
+	resets_lbl.position  = Vector2(card_x + 28, card_y + 210)
+	resets_lbl.size      = Vector2(card_w - 56, 26)
+	resets_lbl.add_theme_font_size_override("font_size", 13)
+	resets_lbl.add_theme_color_override("font_color", C_RED)
+	_prestige_confirm_panel.add_child(resets_lbl)
+
+	var resets_val      := Label.new()
+	resets_val.text      = "Cash  ·  Materials  ·  Crew  ·  Upgrades  ·  Level"
+	resets_val.position  = Vector2(card_x + 28, card_y + 236)
+	resets_val.size      = Vector2(card_w - 56, 28)
+	resets_val.add_theme_font_size_override("font_size", 14)
+	resets_val.add_theme_color_override("font_color", C_TEXT)
+	resets_val.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_prestige_confirm_panel.add_child(resets_val)
+
+	var keeps_lbl      := Label.new()
+	keeps_lbl.text      = "KEEPS:"
+	keeps_lbl.position  = Vector2(card_x + 28, card_y + 280)
+	keeps_lbl.size      = Vector2(card_w - 56, 26)
+	keeps_lbl.add_theme_font_size_override("font_size", 13)
+	keeps_lbl.add_theme_color_override("font_color", C_GREEN)
+	_prestige_confirm_panel.add_child(keeps_lbl)
+
+	var keeps_val      := Label.new()
+	keeps_val.text      = "Gems  ·  Reputation Points  ·  Portfolio  ·  Artifacts"
+	keeps_val.position  = Vector2(card_x + 28, card_y + 306)
+	keeps_val.size      = Vector2(card_w - 56, 28)
+	keeps_val.add_theme_font_size_override("font_size", 14)
+	keeps_val.add_theme_color_override("font_color", C_TEXT)
+	keeps_val.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_prestige_confirm_panel.add_child(keeps_val)
+
+	# Separator
+	var sep3      := ColorRect.new()
+	sep3.color     = C_BORDER
+	sep3.position  = Vector2(card_x + 20, card_y + 346)
+	sep3.size      = Vector2(card_w - 40, 2)
+	_prestige_confirm_panel.add_child(sep3)
+
+	# Warning
+	var warn      := Label.new()
+	warn.text      = "This cannot be undone."
+	warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	warn.position  = Vector2(card_x, card_y + 354)
+	warn.size      = Vector2(card_w, 28)
+	warn.add_theme_font_size_override("font_size", 13)
+	warn.add_theme_color_override("font_color", C_DIM)
+	_prestige_confirm_panel.add_child(warn)
+
+	# CONFIRM button
+	var confirm_btn     := Button.new()
+	confirm_btn.text     = "SIGN CONTRACT"
+	confirm_btn.position = Vector2(card_x + 20, card_y + 390)
+	confirm_btn.size     = Vector2((card_w - 56) / 2, 80)
+	confirm_btn.add_theme_font_size_override("font_size", 18)
+	confirm_btn.pressed.connect(_on_prestige_confirmed)
+	_apply_btn_style(confirm_btn, C_GREEN.darkened(0.30))
+	_prestige_confirm_panel.add_child(confirm_btn)
+
+	# CANCEL button
+	var cancel_btn     := Button.new()
+	cancel_btn.text     = "CANCEL"
+	cancel_btn.position = Vector2(card_x + 36 + (card_w - 56) / 2, card_y + 390)
+	cancel_btn.size     = Vector2((card_w - 56) / 2, 80)
+	cancel_btn.add_theme_font_size_override("font_size", 18)
+	cancel_btn.pressed.connect(_on_prestige_cancel)
+	_apply_btn_style(cancel_btn, Color(0.18, 0.20, 0.30), C_DIM)
+	_prestige_confirm_panel.add_child(cancel_btn)
+
+func _update_contract_panel() -> void:
+	_lbl_contract_rep.text = "Reputation Points: %d RP" % GameState.reputation_points
+
+	# Update artifact cards
+	for card: Dictionary in _artifact_cards:
+		var aid: String    = card["id"]
+		var a              := ArtifactDatabase.get_artifact(aid)
+		var cur_level: int = int(GameState.artifacts.get(aid, 0))
+		var max_level: int = int(a.get("max_level", 1))
+		var maxed: bool    = cur_level >= max_level
+		var cost: int      = ArtifactDatabase.get_cost(aid, cur_level)
+		var can_buy: bool  = not maxed and GameState.reputation_points >= cost
+
+		card["level_lbl"].text = "Level %d / %d" % [cur_level, max_level]
+		if maxed:
+			card["cost_lbl"].text = "MAXED"
+			card["cost_lbl"].add_theme_color_override("font_color", C_GREEN)
+			card["btn"].disabled  = true
+			card["btn"].text      = "Max"
+		else:
+			card["cost_lbl"].text = "Cost: %d RP" % cost
+			card["cost_lbl"].add_theme_color_override("font_color",
+				C_GOLD if can_buy else C_DIM)
+			card["btn"].disabled  = not can_buy
+			card["btn"].text      = "Buy"
+
+	# Rebuild portfolio list
+	for child in _portfolio_list_box.get_children():
+		child.queue_free()
+
+	if GameState.portfolio.is_empty():
+		var empty_lbl      := Label.new()
+		empty_lbl.text      = "No completed buildings yet.\nSign your first New Contract to populate this."
+		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+		empty_lbl.custom_minimum_size  = Vector2(SCREEN_W, 80)
+		empty_lbl.add_theme_color_override("font_color", C_DIM)
+		_portfolio_list_box.add_child(empty_lbl)
+		return
+
+	# Count occurrences by tier_id
+	var counts: Dictionary = {}
+	for entry: String in GameState.portfolio:
+		counts[entry] = counts.get(entry, 0) + 1
+
+	for tier_id: String in counts.keys():
+		var t        := BuildDatabase.get_tier(tier_id)
+		var row      := Label.new()
+		row.text      = "  %s  ×%d" % [(t.get("name") if t.has("name") else tier_id), counts[tier_id]]
+		row.custom_minimum_size = Vector2(SCREEN_W, 38)
+		row.add_theme_color_override("font_color", C_TEXT)
+		_portfolio_list_box.add_child(row)
+
 # ── Shop overlay panel ─────────────────────────────────────────────────────
 func _build_shop_panel() -> void:
 	_shop_panel         = CanvasLayer.new()
@@ -1485,36 +2318,8 @@ func _build_shop_panel() -> void:
 	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
 	_shop_panel.add_child(bg)
 
-	var header      := ColorRect.new()
-	header.color     = Color(0.10, 0.11, 0.17)
-	header.position  = Vector2.ZERO
-	header.size      = Vector2(SCREEN_W, 78)
-	_shop_panel.add_child(header)
-
-	var h_border      := ColorRect.new()
-	h_border.color     = C_GEM
-	h_border.position  = Vector2(0, 76)
-	h_border.size      = Vector2(SCREEN_W, 3)
-	_shop_panel.add_child(h_border)
-
-	var title      := Label.new()
-	title.text      = "SHOP"
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	title.position  = Vector2(60, 0)
-	title.size      = Vector2(SCREEN_W - 120, 78)
-	title.add_theme_font_size_override("font_size", 24)
-	title.add_theme_color_override("font_color", C_TEXT)
-	_shop_panel.add_child(title)
-
-	var close_btn     := Button.new()
-	close_btn.flat     = true
-	close_btn.text     = "X"
-	close_btn.position = Vector2(SCREEN_W - 70, 14)
-	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_color_override("font_color", C_DIM)
+	var close_btn := _build_panel_header(_shop_panel, "SHOP", C_GEM)
 	close_btn.pressed.connect(_on_shop_close)
-	_shop_panel.add_child(close_btn)
 
 	_lbl_shop_gems                      = Label.new()
 	_lbl_shop_gems.text                  = "◆ 0  Gems"
@@ -1566,7 +2371,7 @@ func _build_shop_panel() -> void:
 	_btn_stage_skip.position = Vector2(36, 346)
 	_btn_stage_skip.size     = Vector2(300, 58)
 	_btn_stage_skip.pressed.connect(_on_stage_skip_pressed)
-	_btn_stage_skip.add_theme_color_override("font_color", C_GEM)
+	_apply_btn_style(_btn_stage_skip, C_GEM.darkened(0.45))
 	_shop_panel.add_child(_btn_stage_skip)
 
 	var ad_card      := ColorRect.new()
@@ -1589,15 +2394,19 @@ func _build_shop_panel() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _close_all_panels() -> void:
-	_build_panel.visible    = false
-	_crew_panel.visible     = false
-	_craft_panel.visible    = false
-	_sell_panel.visible     = false
-	_wall_panel.visible     = false
-	_skyline_panel.visible  = false
-	_upgrades_panel.visible = false
-	_shop_panel.visible     = false
-	_menu_overlay.visible   = false
+	_build_panel.visible           = false
+	_crew_panel.visible            = false
+	_craft_panel.visible           = false
+	_sell_panel.visible            = false
+	_wall_panel.visible            = false
+	_skyline_panel.visible         = false
+	_upgrades_panel.visible        = false
+	_contract_panel.visible        = false
+	_prestige_confirm_panel.visible = false
+	_shop_panel.visible            = false
+	_menu_overlay.visible          = false
+	_loc_picker_panel.visible      = false
+	_pin_panel.visible             = false
 
 func _on_menu_btn_pressed() -> void:
 	var opening := not _menu_overlay.visible
@@ -1606,6 +2415,80 @@ func _on_menu_btn_pressed() -> void:
 
 func _on_menu_close() -> void:
 	_menu_overlay.visible = false
+
+# ── Quick-bar shortcut helpers ──────────────────────────────────────────────
+
+## Return the Color accent for a given shortcut id.
+func _shortcut_color(id: String) -> Color:
+	match id:
+		"build":    return C_ACCENT
+		"crew":     return C_GREEN
+		"craft":    return C_LUMBER
+		"sell":     return C_GOLD
+		"skyline":  return C_STONE
+		"upgrades": return C_XP
+		"contract": return C_GEM.darkened(0.3)
+		"shop":     return C_GEM
+		_:          return C_DIM
+
+## Return the SHORTCUT_DEFS entry for id, or empty dict if not found.
+func _shortcut_def(id: String) -> Dictionary:
+	for def: Dictionary in SHORTCUT_DEFS:
+		if def["id"] == id:
+			return def
+	return {}
+
+## Dispatch a quick-bar shortcut tap to the correct panel-open function.
+func _on_shortcut_pressed(id: String) -> void:
+	match id:
+		"build":    _on_menu_build()
+		"crew":     _on_menu_crew()
+		"craft":    _on_menu_craft()
+		"sell":     _on_menu_sell()
+		"skyline":  _on_menu_skyline()
+		"upgrades": _on_menu_upgrades()
+		"contract": _on_menu_contract()
+		"shop":     _on_shop_btn_pressed()
+		"mine":     _on_menu_mine()
+
+## Open the pin customiser panel (called from the "Edit Quick Bar" button).
+func _on_pin_edit_open() -> void:
+	_menu_overlay.visible = false
+	_update_pin_panel_state()
+	_pin_panel.visible = true
+
+## Close the pin customiser panel.
+func _on_pin_edit_close() -> void:
+	_pin_panel.visible = false
+
+## Toggle a shortcut's pinned state (max 4 pinned at once).
+func _on_pin_toggle(id: String) -> void:
+	var pins: Array = GameState.pinned_shortcuts
+	if id in pins:
+		if pins.size() > 1:
+			pins.erase(id)
+		else:
+			_flash_feedback("Keep at least 1 shortcut pinned")
+			return
+	else:
+		if pins.size() >= 4:
+			_flash_feedback("Bar full — unpin one first")
+			return
+		pins.append(id)
+	GameState.pinned_shortcuts = pins
+	_update_pin_panel_state()
+	_rebuild_pin_slots()
+	SaveManager.save_game()
+
+## Refresh border colours and "✓ PINNED" labels in the pin panel.
+func _update_pin_panel_state() -> void:
+	for i in SHORTCUT_DEFS.size():
+		var def: Dictionary = SHORTCUT_DEFS[i]
+		var pinned: bool = def["id"] in GameState.pinned_shortcuts
+		_pin_card_borders[i].color = C_GREEN.darkened(0.3) if pinned else C_BORDER
+		_pin_state_labels[i].text  = "✓ PINNED" if pinned else ""
+
+# ── Menu navigation ─────────────────────────────────────────────────────────
 
 func _on_menu_mine() -> void:
 	_close_all_panels()
@@ -1652,7 +2535,12 @@ func _on_sell_pressed(mat_id: String, qty: int) -> void:
 	_flash_feedback("Sold %d %s  +$ %d" % [sell_qty, mat_id.capitalize(), earned])
 
 func _update_sell_panel() -> void:
-	var mats: Array[String] = ["timber", "stone", "lumber", "concrete"]
+	var mats: Array[String] = [
+		"timber",    "stone",      "sand",      "steel_ore",
+		"clay",      "copper_ore", "limestone", "bauxite",
+		"lumber",    "concrete",   "glass",     "steel_beam",
+		"brick",     "copper_pipe","plaster",   "aluminium",
+	]
 	for i in mats.size():
 		var have: int  = GameState.materials.get(mats[i], 0)
 		var price: int = int(SELL_PRICES.get(mats[i], 1))
@@ -1666,6 +2554,56 @@ func _on_menu_upgrades() -> void:
 
 func _on_upgrades_close() -> void:
 	_upgrades_panel.visible = false
+
+func _on_menu_contract() -> void:
+	_close_all_panels()
+	_contract_panel.visible = true
+	_update_contract_panel()
+
+func _on_contract_close() -> void:
+	_contract_panel.visible = false
+
+func _on_skyline_new_contract_close() -> void:
+	_skyline_panel.visible = false
+
+func _on_new_contract_pressed() -> void:
+	# Show prestige confirmation panel
+	var rep := _calc_prestige_rep()
+	_lbl_prestige_rep_earned.text = "+%d Reputation Points" % rep
+	_lbl_prestige_new_rep.text    = "New total: %d RP" % (GameState.reputation_points + rep)
+	_prestige_confirm_panel.visible = true
+
+func _on_prestige_confirmed() -> void:
+	var rep := _calc_prestige_rep()
+	SaveManager.prestige_reset(rep)
+	_prestige_confirm_panel.visible = false
+	_skyline_panel.visible          = false
+	_update_display()
+	_update_skyline_panel()
+	_update_contract_panel()
+	_flash_feedback("New Contract signed!  +%d Rep" % rep)
+
+func _on_prestige_cancel() -> void:
+	_prestige_confirm_panel.visible = false
+
+func _on_artifact_buy(artifact_id: String) -> void:
+	var a := ArtifactDatabase.get_artifact(artifact_id)
+	if a.is_empty():
+		return
+	var cur_level: int = int(GameState.artifacts.get(artifact_id, 0))
+	if cur_level >= int(a["max_level"]):
+		return
+	var cost: int = ArtifactDatabase.get_cost(artifact_id, cur_level)
+	if GameState.reputation_points < cost:
+		return
+	GameState.reputation_points          -= cost
+	GameState.artifacts[artifact_id]      = cur_level + 1
+	_update_contract_panel()
+	_flash_feedback("%s  Lv.%d!" % [a["name"], cur_level + 1])
+
+func _calc_prestige_rep() -> int:
+	return int(round(3.0 * pow(1.084, float(GameState.player_level - 5))))
+
 
 func _on_upgrade_buy(upgrade_id: String) -> void:
 	var u := UpgradeDatabase.get_upgrade(upgrade_id)
@@ -1772,8 +2710,10 @@ func _on_shop_close() -> void:
 
 func _on_location_btn(loc_id: String) -> void:
 	if GameState.active_location_id == loc_id:
+		_loc_picker_panel.visible = false
 		return
 	GameState.active_location_id = loc_id
+	_loc_picker_panel.visible = false
 	_update_mine_screen()
 
 func _on_tap_node() -> void:
@@ -2197,6 +3137,8 @@ func _update_xp_bar() -> void:
 	var needed := BuildDatabase.get_xp_needed(GameState.player_level)
 	var pct    := minf(GameState.player_xp / needed, 1.0)
 	_xp_bar_fill.size.x = float(SCREEN_W) * pct
+	if _lbl_xp:
+		_lbl_xp.text = "%d / %d XP" % [int(GameState.player_xp), int(needed)]
 
 func _update_mine_screen() -> void:
 	var loc_id   := GameState.active_location_id
@@ -2204,13 +3146,20 @@ func _update_mine_screen() -> void:
 	var mat: String = loc_data.get("material", "timber")
 	var accent      := _mat_color(mat)
 
-	# Location bar indicators
-	var locs := BuildDatabase.LOCATION_ORDER
-	for i in _loc_btns.size():
-		var lid: String = locs[i]
-		var is_active   := lid == loc_id
-		_loc_btns[i].add_theme_color_override("font_color", accent if is_active else C_DIM)
-		_loc_indicators[i].visible = is_active
+	# Backdrop texture (only reload when location changes)
+	if loc_id != _last_backdrop_loc:
+		_last_backdrop_loc = loc_id
+		var bg_path: String = BACKDROP_PATHS.get(loc_id, "")
+		if bg_path != "" and ResourceLoader.exists(bg_path):
+			_mine_backdrop.texture = load(bg_path)
+		else:
+			_mine_backdrop.texture = null
+
+	# Location bar
+	var display_name: String = loc_data.get("display_name", loc_id)
+	_lbl_active_loc.text = display_name
+	_lbl_active_loc.add_theme_color_override("font_color", accent)
+	_loc_bar_accent.color = accent
 
 	# Node visual
 	var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})

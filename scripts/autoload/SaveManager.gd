@@ -28,7 +28,8 @@ func save_game() -> void:
 	GameState.last_saved_timestamp = now
 
 	var data := {
-		"version":               3,
+		"version":               4,
+		# -- Temporary (reset on New Contract) --
 		"cash":                  GameState.cash,
 		"gems":                  GameState.gems,
 		"materials":             GameState.materials,
@@ -40,7 +41,14 @@ func save_game() -> void:
 		"active_location_id":    GameState.active_location_id,
 		"location_nodes":        GameState.location_nodes,
 		"upgrades":              GameState.upgrades,
+		# -- Permanent (survive New Contract reset) --
+		"reputation_points":     GameState.reputation_points,
+		"contract_count":        GameState.contract_count,
+		"portfolio":             GameState.portfolio,
+		"artifacts":             GameState.artifacts,
 		"last_saved_timestamp":  now,
+		# -- UI preferences (permanent, survive prestige) --
+		"pinned_shortcuts":      GameState.pinned_shortcuts,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -90,7 +98,14 @@ func load_game() -> void:
 		GameState.current_building["stage_started"] = false
 	if not GameState.current_building.has("stage_progress"):
 		GameState.current_building["stage_progress"] = 0.0
-	GameState.upgrades = d.get("upgrades", {})
+	GameState.upgrades            = d.get("upgrades", {})
+
+	# -- Permanent fields (always loaded, never reset by prestige) --
+	GameState.reputation_points   = int(d.get("reputation_points", 0))
+	GameState.contract_count      = int(d.get("contract_count", 0))
+	GameState.portfolio           = d.get("portfolio", [])
+	GameState.artifacts           = d.get("artifacts", {})
+	GameState.pinned_shortcuts    = d.get("pinned_shortcuts", ["build", "crew", "craft", "sell"])
 
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
@@ -120,7 +135,35 @@ func _init_fresh_state() -> void:
 	GameState.active_location_id   = "lumber_yard"
 	GameState.location_nodes       = BuildDatabase.get_default_location_nodes()
 	GameState.upgrades             = {}
+	GameState.reputation_points    = 0
+	GameState.contract_count       = 0
+	GameState.portfolio            = []
+	GameState.artifacts            = {}
 	GameState.last_saved_timestamp = Time.get_unix_time_from_system()
+	GameState.pinned_shortcuts     = ["build", "crew", "craft", "sell"]
+
+## Reset all temporary state for a New Contract (prestige).
+## rep_earned is added to the permanent reputation_points total.
+## Permanent fields (gems, rep, portfolio, artifacts) survive.
+func prestige_reset(rep_earned: int) -> void:
+	# Accumulate permanent gains
+	GameState.reputation_points += rep_earned
+	GameState.contract_count    += 1
+	# Move this contract's skyline into the all-time portfolio
+	for b: String in GameState.skyline:
+		GameState.portfolio.append(b)
+	# Reset temporary state (gems survive)
+	GameState.cash               = 100
+	GameState.materials          = {}
+	GameState.crew               = []
+	GameState.current_building   = _default_building()
+	GameState.skyline            = []
+	GameState.player_level       = 1
+	GameState.player_xp          = 0.0
+	GameState.active_location_id = "lumber_yard"
+	GameState.location_nodes     = BuildDatabase.get_default_location_nodes()
+	GameState.upgrades           = {}
+	save_game()
 
 func _default_building() -> Dictionary:
 	return {
