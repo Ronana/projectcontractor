@@ -537,7 +537,7 @@ func _make_empty_node_vis() -> Dictionary:
 			 "hp_fill": hp_fill, "lbl": lbl, "max_hp": 10.0,
 			 "pos": Vector2(-1.0, -1.0) }
 
-func _setup_node_vis(vis: Dictionary, mat: String, node_name: String,
+func _setup_node_vis(vis: Dictionary, mat: String, _node_name: String,
 		accent: Color, max_hp: float) -> void:
 	var c: Node2D = vis["container"]
 	# Free previous ColorRect shape parts
@@ -623,7 +623,7 @@ func _random_mine_pos(slot_idx: int, total: int) -> Vector2:
 	var cols  := clampi(total, 1, 3)
 	var rows  := ceili(float(total) / float(cols))
 	var col   := slot_idx % cols
-	var row   := slot_idx / cols
+	var row   := int(slot_idx / float(cols))
 	var cw    := (x_max - x_min) / float(cols)
 	var ch    := (y_max - y_min) / float(rows)
 	var cx    := x_min + cw * (float(col) + 0.5) + randf_range(-cw * 0.22, cw * 0.22)
@@ -921,7 +921,7 @@ func _build_bottom_bar() -> void:
 	add_child(_bottom_bar_cl)
 
 	var bar_y   := SCREEN_H - BOTTOM_BAR_H
-	var slot_w  := SCREEN_W / 5   # 144 px per slot (5 slots total)
+	var slot_w  := int(SCREEN_W / 5.0)   # 144 px per slot (5 slots total)
 
 	# Background
 	var bg      := ColorRect.new()
@@ -994,7 +994,7 @@ func _rebuild_pin_slots() -> void:
 	_pin_slot_nodes.clear()
 
 	var bar_y  := SCREEN_H - BOTTOM_BAR_H
-	var slot_w := SCREEN_W / 5   # 144 px
+	var slot_w := int(SCREEN_W / 5.0)   # 144 px
 	var icon_sz := 36
 
 	var pins: Array = GameState.pinned_shortcuts
@@ -2497,8 +2497,8 @@ func _build_prestige_confirm_panel() -> void:
 	# Card
 	var card_w := 660
 	var card_h := 560
-	var card_x := (SCREEN_W - card_w) / 2
-	var card_y := (SCREEN_H - card_h) / 2
+	var card_x := int((SCREEN_W - card_w) / 2.0)
+	var card_y := int((SCREEN_H - card_h) / 2.0)
 
 	var card      := ColorRect.new()
 	card.color     = C_PANEL
@@ -2620,7 +2620,7 @@ func _build_prestige_confirm_panel() -> void:
 	var confirm_btn     := Button.new()
 	confirm_btn.text     = "SIGN CONTRACT"
 	confirm_btn.position = Vector2(card_x + 20, card_y + 390)
-	confirm_btn.size     = Vector2((card_w - 56) / 2, 80)
+	confirm_btn.size     = Vector2(int((card_w - 56) / 2.0), 80)
 	confirm_btn.add_theme_font_size_override("font_size", 18)
 	confirm_btn.pressed.connect(_on_prestige_confirmed)
 	_apply_btn_style(confirm_btn, C_GREEN.darkened(0.30))
@@ -2629,8 +2629,8 @@ func _build_prestige_confirm_panel() -> void:
 	# CANCEL button
 	var cancel_btn     := Button.new()
 	cancel_btn.text     = "CANCEL"
-	cancel_btn.position = Vector2(card_x + 36 + (card_w - 56) / 2, card_y + 390)
-	cancel_btn.size     = Vector2((card_w - 56) / 2, 80)
+	cancel_btn.position = Vector2(card_x + 36 + int((card_w - 56) / 2.0), card_y + 390)
+	cancel_btn.size     = Vector2(int((card_w - 56) / 2.0), 80)
 	cancel_btn.add_theme_font_size_override("font_size", 18)
 	cancel_btn.pressed.connect(_on_prestige_cancel)
 	_apply_btn_style(cancel_btn, Color(0.18, 0.20, 0.30), C_DIM)
@@ -3526,7 +3526,7 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 
 func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
 	var have: int = GameState.materials.get(raw_id, 0)
-	var made: int = have / cost
+	var made: int = int(have / float(cost))
 	if made <= 0:
 		return
 	GameState.materials[raw_id] = have - made * cost
@@ -3548,11 +3548,11 @@ func _update_craft_panel() -> void:
 		_craft_inv_lbls[i].text = "%s\n%s" % [inv_names[i], _fmt(GameState.materials.get(inv_mats[i], 0))]
 
 	var raw_ids:   Array[String] = ["timber", "stone"]
-	var ref_ids:   Array[String] = ["lumber", "concrete"]
+	var _ref_ids:   Array[String] = ["lumber", "concrete"]
 	var costs:     Array[int]    = [3, 3]
 	for i in 2:
 		var have: int     = GameState.materials.get(raw_ids[i], 0)
-		var can_make: int = have / costs[i]
+		var can_make: int = int(have / float(costs[i]))
 		_craft_yield_lbls[i].text  = "Will make: %s" % _fmt(can_make)
 		_craft1_btns[i].disabled   = have < costs[i]
 		_craftall_btns[i].disabled = have < costs[i]
@@ -3853,7 +3853,7 @@ func _build_toolbox_panel() -> void:
 	# Drag handle
 	var handle      := ColorRect.new()
 	handle.color     = C_ORANGE.darkened(0.3)
-	handle.position  = Vector2(SCREEN_W / 2 - 24, SHEET_Y + 8)
+	handle.position  = Vector2(SCREEN_W / 2.0 - 24, SHEET_Y + 8)
 	handle.size      = Vector2(48, 4)
 	_toolbox_panel.add_child(handle)
 
@@ -3892,7 +3892,7 @@ func _build_toolbox_panel() -> void:
 	for idx: int in items.size():
 		var item : Dictionary = items[idx]
 		var col  := idx % COLS
-		var row  := idx / COLS
+		var row  := int(idx / float(COLS))
 		_make_toolbox_cell(_toolbox_panel, item, idx,
 			Vector2(col * CELL_W, GRID_TOP + row * CELL_H), CELL_W, CELL_H)
 
@@ -3977,7 +3977,7 @@ func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
 
 	# Symbol square (centred vertically in cell)
 	var SYM  := 38
-	var sy   := int(pos.y) + (h - SYM) / 2
+	var sy   := int(pos.y) + (h - SYM) / 2.0
 	var sym_bg      := ColorRect.new()
 	sym_bg.color     = item_col.darkened(0.55)
 	sym_bg.position  = Vector2(pos.x + 10, sy)
@@ -4556,8 +4556,8 @@ func _build_offline_popup() -> void:
 	# Panel card
 	const CARD_W := 600
 	const CARD_H := 560
-	const CARD_X := (SCREEN_W - CARD_W) / 2
-	const CARD_Y := (SCREEN_H - CARD_H) / 2
+	const CARD_X := int((SCREEN_W - CARD_W) / 2.0)
+	const CARD_Y := int((SCREEN_H - CARD_H) / 2.0)
 
 	var card_bg := ColorRect.new()
 	card_bg.color    = Color(0.08, 0.09, 0.13, 0.98)
@@ -4634,7 +4634,7 @@ func _build_offline_popup() -> void:
 	var btn      := Button.new()
 	btn.text      = "COLLECT"
 	btn.flat      = false
-	btn.position  = Vector2(CARD_X + (CARD_W - 240) / 2, CARD_Y + CARD_H - 76)
+	btn.position  = Vector2(CARD_X + int((CARD_W - 240) / 2.0), CARD_Y + CARD_H - 76)
 	btn.size      = Vector2(240, 54)
 	btn.add_theme_font_size_override("font_size", 18)
 	btn.add_theme_color_override("font_color", Color(0.04, 0.04, 0.06))
@@ -4659,8 +4659,8 @@ func _show_offline_popup(summary: Dictionary) -> void:
 
 	# Time string
 	var secs  := int(summary.elapsed)
-	var hours := secs / 3600
-	var mins  := (secs % 3600) / 60
+	var hours := int(secs / 3600.0)
+	var mins  := int((secs % 3600) / 60.0)
 	if hours > 0:
 		_lbl_offline_time.text = "You were away for %dh %dm" % [hours, mins]
 	else:

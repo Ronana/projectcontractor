@@ -167,8 +167,8 @@ func _next_weekly_reset(now: float) -> float:
 ## Human-readable countdown string.
 func time_until_string(target: float) -> String:
 	var secs: int = maxi(0, int(target - Time.get_unix_time_from_system()))
-	var h: int = secs / 3600
-	var m: int = (secs % 3600) / 60
+	var h: int = int(secs / 3600.0)
+	var m: int = int((secs % 3600) / 60.0)
 	var s: int = secs % 60
 	if h > 0:
 		return "%dh %02dm" % [h, m]
