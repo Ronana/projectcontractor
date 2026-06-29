@@ -37,6 +37,7 @@ const SHORTCUT_DEFS: Array = [
 	{"id": "contract", "label": "CONTRACT", "symbol": "R"},
 	{"id": "shop",     "label": "SHOP",     "symbol": "◆"},
 	{"id": "missions", "label": "MISSIONS", "symbol": "M"},
+	{"id": "toolbox",  "label": "TOOLBOX",  "symbol": "T"},
 ]
 
 # ── Colour palette ─────────────────────────────────────────────────────────
@@ -223,6 +224,20 @@ var _offline_popup:    CanvasLayer
 var _offline_rows_box: VBoxContainer
 var _lbl_offline_time: Label
 
+# ── Toolbox panel refs ──────────────────────────────────────────────────────
+var _toolbox_panel:         CanvasLayer
+var _toolbox_cells:         Array = []   # [{bg, border, symbol_lbl, name_lbl, count_badge, item_id}]
+var _toolbox_selected:      String = ""
+var _lbl_tb_item_name:      Label
+var _lbl_tb_item_desc:      Label
+var _lbl_tb_item_count:     Label
+var _btn_tb_use:            Button
+var _btn_tb_buy:            Button
+var _toolbox_float_cl:      CanvasLayer   # persistent floating button on mine screen
+var _boost_strip:           CanvasLayer   # thin strip showing active boost timers
+var _boost_chip_box:        HBoxContainer
+var _boost_strip_timer:     float = 0.0
+
 # ── Missions panel refs ─────────────────────────────────────────────────────
 var _missions_panel:      CanvasLayer
 var _mission_card_refs:   Array = []   # [{prog_bar, prog_lbl, claim_btn, mission_id}]
@@ -256,6 +271,9 @@ func _ready() -> void:
 	_build_offline_popup()
 	_build_missions_panel()
 	MissionManager.missions_changed.connect(_update_missions_panel)
+	_build_toolbox_panel()
+	_build_toolbox_float_btn()
+	_build_boost_strip()
 	_update_display()
 	_check_offline_summary()
 	_apply_global_font()
@@ -275,6 +293,12 @@ var _mission_countdown_timer: float = 0.0
 
 func _process(delta: float) -> void:
 	_tick_workers(delta)
+	# Refresh active boost strip every second
+	_boost_strip_timer += delta
+	if _boost_strip_timer >= 1.0:
+		_boost_strip_timer = 0.0
+		_update_boost_strip()
+
 	# Refresh mission countdown labels every second while panel is open
 	if _missions_panel and _missions_panel.visible:
 		_mission_countdown_timer += delta
@@ -615,10 +639,15 @@ func _refresh_mine_visuals(loc_id: String) -> void:
 	for i in MAX_NODES:
 		var vis: Dictionary = _node_visuals[i]
 		if i < count:
-			var nd: Dictionary    = nodes[i]
-			var node_id: String   = nd.get("node_id", "")
+			var nd: Dictionary  = nodes[i]
+			var node_id: String = nd.get("node_id", "")
+			# Cleared slot — hide until wave respawn
+			if node_id == "":
+				vis["container"].visible = false
+				continue
 			var node_data         := BuildDatabase.get_node_data(node_id)
-			var max_hp: float     = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+			var base_hp: float    = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+			var max_hp: float     = float(nd.get("max_hp", base_hp))
 			var node_name: String = node_data.get("name", node_id) if not node_data.is_empty() else node_id
 			_setup_node_vis(vis, mat, node_name, accent, max_hp)
 			# Assign position: reuse stored pos or generate a new one
@@ -633,15 +662,14 @@ func _refresh_mine_visuals(loc_id: String) -> void:
 			vis["container"].visible = false
 
 func _update_mine_hps(loc_id: String) -> void:
-	var loc_data := BuildDatabase.get_location(loc_id)
-	var mat: String  = loc_data.get("material", "timber")
-	var accent       := _mat_color(mat)
 	var nodes: Array = GameState.location_nodes.get(loc_id, [])
 	for i in mini(nodes.size(), MAX_NODES):
-		var nd: Dictionary = nodes[i]
+		var nd: Dictionary  = nodes[i]
 		var node_id: String = nd.get("node_id", "")
+		if node_id == "": continue   # cleared slot — bar already hidden
 		var node_data := BuildDatabase.get_node_data(node_id)
-		var max_hp: float = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+		var base_hp: float = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+		var max_hp: float  = float(nd.get("max_hp", base_hp))
 		_update_mine_hp_bar(_node_visuals[i], float(nd.get("hp", max_hp)), max_hp)
 
 func _update_mine_hp_bar(vis: Dictionary, hp: float, max_hp: float) -> void:
@@ -1065,7 +1093,8 @@ func _build_menu_overlay() -> void:
 		["UPGRADES", C_XP,      _on_menu_upgrades],
 		["CONTRACT", C_GOLD,    _on_menu_contract],
 		["SHOP",     C_GEM,     _on_shop_btn_pressed],
-		["MISSIONS", C_GOLD,    _on_menu_missions],
+		["MISSIONS", C_GOLD,             _on_menu_missions],
+		["TOOLBOX",  Color(0.9, 0.5, 0.2), _on_menu_toolbox],
 	]
 	var cols      := 3
 	var rows      := 4
@@ -2761,6 +2790,7 @@ func _close_all_panels() -> void:
 	_prestige_confirm_panel.visible = false
 	_shop_panel.visible            = false
 	_missions_panel.visible        = false
+	_toolbox_panel.visible         = false
 	_menu_overlay.visible          = false
 	_loc_picker_panel.visible      = false
 	_pin_panel.visible             = false
@@ -2787,6 +2817,7 @@ func _shortcut_color(id: String) -> Color:
 		"contract": return C_GEM.darkened(0.3)
 		"shop":     return C_GEM
 		"missions": return C_GOLD
+		"toolbox":  return Color(0.90, 0.50, 0.20)
 		_:          return C_DIM
 
 ## Return the SHORTCUT_DEFS entry for id, or empty dict if not found.
@@ -2808,6 +2839,7 @@ func _on_shortcut_pressed(id: String) -> void:
 		"contract": _on_menu_contract()
 		"shop":     _on_shop_btn_pressed()
 		"missions": _on_menu_missions()
+		"toolbox":  _on_menu_toolbox()
 		"mine":     _on_menu_mine()
 
 ## Open the pin customiser panel (called from the "Edit Quick Bar" button).
@@ -2990,10 +3022,24 @@ func _on_upgrade_buy(upgrade_id: String) -> void:
 			GameState.cash -= needed
 		else:
 			GameState.materials[mat] = GameState.materials.get(mat, 0) - needed
-	GameState.upgrades[upgrade_id] = cur_level + 1
+	var new_level: int = cur_level + 1
+	GameState.upgrades[upgrade_id] = new_level
+
+	# Extra Node Slot: bump active_node_count, pad arrays, spawn fresh wave
+	if upgrade_id == "extra_node_slot":
+		GameState.active_node_count = 1 + new_level
+		for loc_id: String in GameState.location_nodes.keys():
+			var nodes: Array = GameState.location_nodes[loc_id]
+			var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
+			while nodes.size() < GameState.active_node_count:
+				if best.is_empty(): break
+				var hp: float = _random_node_hp(float(best.get("hp", 10)))
+				nodes.append({"node_id": best.get("id", ""), "hp": hp, "max_hp": hp})
+		_refresh_mine_visuals(GameState.active_location_id)
+
 	_update_upgrades_panel()
 	_update_hud()
-	_flash_feedback("%s  Lv.%d!" % [u["name"], cur_level + 1])
+	_flash_feedback("%s  Lv.%d!" % [u["name"], new_level])
 
 func _update_upgrades_panel() -> void:
 	var all_upgrades := UpgradeDatabase.get_all()
@@ -3084,22 +3130,21 @@ func _apply_node_damage(loc_id: String, dmg: float) -> void:
 	var nodes: Array = GameState.location_nodes.get(loc_id, [])
 	if nodes.is_empty():
 		return
-	# Always hit the lowest-HP node (focus-fire for snappy feel)
-	var target_idx := 0
-	var min_hp: float = float(nodes[0].get("hp", 0.0))
-	for i in range(1, nodes.size()):
-		var h: float = float(nodes[i].get("hp", 0.0))
-		if h < min_hp:
-			min_hp = h
-			target_idx = i
-	var new_hp: float = min_hp - dmg
-	if new_hp <= 0.0:
-		_break_node(loc_id, target_idx)
-	else:
-		nodes[target_idx]["hp"] = new_hp
-		if loc_id == GameState.active_location_id:
-			_flash_node_hit(target_idx)
-			_update_mine_screen()
+	# Damage ALL active (non-cleared) nodes simultaneously.
+	var did_break := false
+	for i in nodes.size():
+		var nd: Dictionary = nodes[i]
+		if nd.get("node_id", "") == "": continue   # cleared, waiting for wave
+		var new_hp: float = float(nd.get("hp", 0.0)) - dmg
+		if new_hp <= 0.0:
+			_break_node(loc_id, i)
+			did_break = true
+		else:
+			nd["hp"] = new_hp
+			if loc_id == GameState.active_location_id:
+				_flash_node_hit(i)
+	if loc_id == GameState.active_location_id and not did_break:
+		_update_mine_hps(loc_id)
 
 func _break_node(loc_id: String, node_idx: int) -> void:
 	var nodes: Array = GameState.location_nodes.get(loc_id, [])
@@ -3124,20 +3169,41 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	if loc_id == GameState.active_location_id:
 		_flash_feedback("+%d %s   +%.0f XP" % [total_drop, mat.capitalize(), total_xp])
 
-	# Respawn in-place: new node, new random position
-	var best_node := BuildDatabase.get_active_node(loc_id, GameState.player_level)
-	if not best_node.is_empty():
-		nodes[node_idx] = {
-			"node_id": best_node.get("id", ""),
-			"hp":      float(best_node.get("hp", 10))
-		}
-		# Assign fresh visual position for respawned slot
-		if node_idx < _node_visuals.size():
-			_node_visuals[node_idx]["pos"] = _random_mine_pos(node_idx, nodes.size())
+	# Mark slot as cleared (empty) — hide it
+	nodes[node_idx] = {"node_id": "", "hp": 0.0, "max_hp": 0.0}
+	if loc_id == GameState.active_location_id and node_idx < _node_visuals.size():
+		_node_visuals[node_idx]["container"].visible = false
 
+	# Check if all slots are cleared — if so, spawn the next wave
+	var all_clear := true
+	for slot: Dictionary in nodes:
+		if slot.get("node_id", "") != "":
+			all_clear = false
+			break
+	if all_clear:
+		_spawn_wave(loc_id)
+
+	_update_hud()
+
+## Spawn a fresh wave of nodes for a location with randomised HP.
+func _spawn_wave(loc_id: String) -> void:
+	var nodes: Array = GameState.location_nodes.get(loc_id, [])
+	var best_node := BuildDatabase.get_active_node(loc_id, GameState.player_level)
+	if best_node.is_empty():
+		return
+	var base_hp: float = float(best_node.get("hp", 10))
+	for i in nodes.size():
+		var hp: float = _random_node_hp(base_hp)
+		nodes[i] = {"node_id": best_node.get("id", ""), "hp": hp, "max_hp": hp}
+		# Reset position so each node gets a fresh scatter position
+		if i < _node_visuals.size():
+			_node_visuals[i]["pos"] = Vector2(-1.0, -1.0)
 	if loc_id == GameState.active_location_id:
 		_refresh_mine_visuals(loc_id)
-	_update_hud()
+
+## Returns a HP value in the range [base * 0.8, base * 1.2], rounded to int.
+func _random_node_hp(base_hp: float) -> float:
+	return roundf(base_hp * randf_range(0.8, 1.2))
 
 func _gain_xp(amount: float) -> void:
 	GameState.player_xp += amount
@@ -3150,20 +3216,20 @@ func _gain_xp(amount: float) -> void:
 	_update_xp_bar()
 
 func _on_level_up() -> void:
-	# Upgrade any nodes that now have a better tier available
+	# Upgrade any locations that now have a better node tier available.
+	# Spawn a fresh wave for each so HP is re-randomised at the new tier.
 	for loc_id: String in GameState.location_nodes.keys():
 		var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
 		if best.is_empty(): continue
 		var nodes: Array = GameState.location_nodes[loc_id]
+		var needs_upgrade := false
 		for nd: Dictionary in nodes:
 			if nd.get("node_id", "") != best.get("id", ""):
-				nd["node_id"] = best.get("id", "")
-				nd["hp"]      = float(best.get("hp", 10))
-	# Reset visual positions so upgraded nodes get fresh placement
-	for vis: Dictionary in _node_visuals:
-		vis["pos"] = Vector2(-1.0, -1.0)
+				needs_upgrade = true
+				break
+		if needs_upgrade:
+			_spawn_wave(loc_id)
 	_flash_feedback("LEVEL UP!   Lv. %d" % GameState.player_level)
-	_refresh_mine_visuals(GameState.active_location_id)
 	_update_hud()
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3733,6 +3799,484 @@ func _on_menu_missions() -> void:
 	_close_all_panels()
 	_update_missions_panel()
 	_missions_panel.visible = true
+
+# ══════════════════════════════════════════════════════════════════════════
+# Toolbox Panel
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_toolbox_panel() -> void:
+	# ── Layout constants (bottom sheet — mine area stays visible above) ────
+	# Sheet covers bottom ~42% of screen: 3 rows of items + detail + header
+	const COLS      := 3
+	const CELL_W    := 240
+	const CELL_H    := 80
+	const ITEMS_H   := CELL_H * 3                          # 240 (3 rows)
+	const HEADER_H  := 44
+	const DETAIL_H  := 196
+	const SHEET_H   : int = HEADER_H + ITEMS_H + DETAIL_H # 480
+	const SHEET_Y   : int = SCREEN_H - BOTTOM_BAR_H - SHEET_H  # 700
+	const C_ORANGE  := Color(0.90, 0.50, 0.20)
+
+	_toolbox_panel         = CanvasLayer.new()
+	_toolbox_panel.name    = "ToolboxPanel"
+	_toolbox_panel.layer   = 23
+	_toolbox_panel.visible = false
+	add_child(_toolbox_panel)
+
+	# Semi-transparent scrim above sheet (tap to close)
+	var scrim      := ColorRect.new()
+	scrim.color     = Color(0.0, 0.0, 0.0, 0.45)
+	scrim.position  = Vector2(0, MINE_Y)
+	scrim.size      = Vector2(SCREEN_W, SHEET_Y - MINE_Y)
+	_toolbox_panel.add_child(scrim)
+	var scrim_btn      := Button.new()
+	scrim_btn.flat      = true
+	scrim_btn.position  = Vector2(0, MINE_Y)
+	scrim_btn.size      = Vector2(SCREEN_W, SHEET_Y - MINE_Y)
+	_toolbox_panel.add_child(scrim_btn)
+	scrim_btn.pressed.connect(func() -> void: _toolbox_panel.visible = false)
+
+	# Sheet background
+	var bg      := ColorRect.new()
+	bg.color     = Color(0.09, 0.10, 0.15, 0.98)
+	bg.position  = Vector2(0, SHEET_Y)
+	bg.size      = Vector2(SCREEN_W, SHEET_H)
+	_toolbox_panel.add_child(bg)
+
+	# Orange top strip
+	var top_strip      := ColorRect.new()
+	top_strip.color     = C_ORANGE
+	top_strip.position  = Vector2(0, SHEET_Y)
+	top_strip.size      = Vector2(SCREEN_W, 3)
+	_toolbox_panel.add_child(top_strip)
+
+	# Drag handle
+	var handle      := ColorRect.new()
+	handle.color     = C_ORANGE.darkened(0.3)
+	handle.position  = Vector2(SCREEN_W / 2 - 24, SHEET_Y + 8)
+	handle.size      = Vector2(48, 4)
+	_toolbox_panel.add_child(handle)
+
+	# Title
+	var title      := Label.new()
+	title.text      = "TOOLBOX"
+	title.position  = Vector2(16, SHEET_Y + 6)
+	title.size      = Vector2(400, HEADER_H - 6)
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_color_override("font_color", C_ORANGE)
+	_toolbox_panel.add_child(title)
+
+	# Close button
+	var close_btn      := Button.new()
+	close_btn.flat      = true
+	close_btn.text      = "✕"
+	close_btn.position  = Vector2(SCREEN_W - 56, SHEET_Y + 4)
+	close_btn.size      = Vector2(48, HEADER_H - 4)
+	close_btn.add_theme_font_size_override("font_size", 16)
+	close_btn.add_theme_color_override("font_color", C_DIM)
+	_toolbox_panel.add_child(close_btn)
+	close_btn.pressed.connect(func() -> void: _toolbox_panel.visible = false)
+
+	# Separator below header
+	var sep      := ColorRect.new()
+	sep.color     = C_BORDER
+	sep.position  = Vector2(0, SHEET_Y + HEADER_H - 1)
+	sep.size      = Vector2(SCREEN_W, 1)
+	_toolbox_panel.add_child(sep)
+
+	# ── Item grid ─────────────────────────────────────────────────────────
+	var GRID_TOP : int = SHEET_Y + HEADER_H
+	var items        := ToolboxDatabase.get_all()
+	_toolbox_cells.clear()
+	for idx: int in items.size():
+		var item : Dictionary = items[idx]
+		var col  := idx % COLS
+		var row  := idx / COLS
+		_make_toolbox_cell(_toolbox_panel, item, idx,
+			Vector2(col * CELL_W, GRID_TOP + row * CELL_H), CELL_W, CELL_H)
+
+	# ── Detail section ────────────────────────────────────────────────────
+	var DET_Y : int = GRID_TOP + ITEMS_H
+
+	var det_sep      := ColorRect.new()
+	det_sep.color     = C_BORDER
+	det_sep.position  = Vector2(0, DET_Y)
+	det_sep.size      = Vector2(SCREEN_W, 1)
+	_toolbox_panel.add_child(det_sep)
+
+	var det_bg      := ColorRect.new()
+	det_bg.color     = Color(0.07, 0.08, 0.12)
+	det_bg.position  = Vector2(0, DET_Y + 1)
+	det_bg.size      = Vector2(SCREEN_W, DETAIL_H - 1)
+	_toolbox_panel.add_child(det_bg)
+
+	_lbl_tb_item_name = Label.new()
+	_lbl_tb_item_name.text      = "Select an item"
+	_lbl_tb_item_name.position  = Vector2(16, DET_Y + 8)
+	_lbl_tb_item_name.size      = Vector2(SCREEN_W - 32, 28)
+	_lbl_tb_item_name.add_theme_font_size_override("font_size", 16)
+	_lbl_tb_item_name.add_theme_color_override("font_color", Color.WHITE)
+	_toolbox_panel.add_child(_lbl_tb_item_name)
+
+	_lbl_tb_item_desc = Label.new()
+	_lbl_tb_item_desc.text      = ""
+	_lbl_tb_item_desc.position  = Vector2(16, DET_Y + 38)
+	_lbl_tb_item_desc.size      = Vector2(SCREEN_W - 32, 36)
+	_lbl_tb_item_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_lbl_tb_item_desc.add_theme_font_size_override("font_size", 13)
+	_lbl_tb_item_desc.add_theme_color_override("font_color", C_DIM)
+	_toolbox_panel.add_child(_lbl_tb_item_desc)
+
+	_lbl_tb_item_count = Label.new()
+	_lbl_tb_item_count.text      = ""
+	_lbl_tb_item_count.position  = Vector2(16, DET_Y + 76)
+	_lbl_tb_item_count.size      = Vector2(SCREEN_W - 32, 22)
+	_lbl_tb_item_count.add_theme_font_size_override("font_size", 13)
+	_lbl_tb_item_count.add_theme_color_override("font_color", C_TEXT)
+	_toolbox_panel.add_child(_lbl_tb_item_count)
+
+	_btn_tb_use = Button.new()
+	_btn_tb_use.text     = "USE"
+	_btn_tb_use.position = Vector2(12, DET_Y + DETAIL_H - 58)
+	_btn_tb_use.size     = Vector2(336, 48)
+	_btn_tb_use.add_theme_font_size_override("font_size", 16)
+	_btn_tb_use.disabled = true
+	_toolbox_panel.add_child(_btn_tb_use)
+	_btn_tb_use.pressed.connect(_on_use_item)
+
+	_btn_tb_buy = Button.new()
+	_btn_tb_buy.text     = "BUY  ◆1"
+	_btn_tb_buy.position = Vector2(360, DET_Y + DETAIL_H - 58)
+	_btn_tb_buy.size     = Vector2(348, 48)
+	_btn_tb_buy.add_theme_font_size_override("font_size", 16)
+	_btn_tb_buy.disabled = true
+	_toolbox_panel.add_child(_btn_tb_buy)
+	_btn_tb_buy.pressed.connect(_on_buy_item)
+
+
+func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
+		pos: Vector2, w: int, h: int) -> void:
+	# Compact 80px cell: 36×36 symbol square + name/cost to the right + count badge
+	var rarity_col : Color  = ToolboxDatabase.rarity_color(item.get("rarity", "common"))
+	var item_col   : Color  = item.get("color", Color.WHITE)
+	var item_id    : String = item.get("id", "")
+
+	var cell_bg      := ColorRect.new()
+	cell_bg.color     = C_CARD
+	cell_bg.position  = pos + Vector2(1, 1)
+	cell_bg.size      = Vector2(w - 2, h - 2)
+	parent.add_child(cell_bg)
+
+	# Rarity top strip
+	var border      := ColorRect.new()
+	border.color     = rarity_col
+	border.position  = pos + Vector2(1, 1)
+	border.size      = Vector2(w - 2, 3)
+	parent.add_child(border)
+
+	# Symbol square (centred vertically in cell)
+	var SYM  := 38
+	var sy   := int(pos.y) + (h - SYM) / 2
+	var sym_bg      := ColorRect.new()
+	sym_bg.color     = item_col.darkened(0.55)
+	sym_bg.position  = Vector2(pos.x + 10, sy)
+	sym_bg.size      = Vector2(SYM, SYM)
+	parent.add_child(sym_bg)
+
+	var sym_lbl      := Label.new()
+	sym_lbl.text      = item.get("symbol", "?")
+	sym_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sym_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	sym_lbl.position  = Vector2(pos.x + 10, sy)
+	sym_lbl.size      = Vector2(SYM, SYM)
+	sym_lbl.add_theme_font_size_override("font_size", 18)
+	sym_lbl.add_theme_color_override("font_color", item_col)
+	parent.add_child(sym_lbl)
+
+	# Name (top half of right area)
+	var name_lbl      := Label.new()
+	name_lbl.text      = item.get("name", "")
+	name_lbl.position  = pos + Vector2(56, 12)
+	name_lbl.size      = Vector2(w - 66, 26)
+	name_lbl.add_theme_font_size_override("font_size", 12)
+	name_lbl.add_theme_color_override("font_color", C_TEXT)
+	parent.add_child(name_lbl)
+
+	# Cost (below name)
+	var cost_lbl      := Label.new()
+	cost_lbl.text      = "◆%d" % item.get("gem_cost", 1)
+	cost_lbl.position  = pos + Vector2(56, 40)
+	cost_lbl.size      = Vector2(w - 66, 20)
+	cost_lbl.add_theme_font_size_override("font_size", 12)
+	cost_lbl.add_theme_color_override("font_color", C_GEM)
+	parent.add_child(cost_lbl)
+
+	# Count badge (bottom-right)
+	var badge_bg      := ColorRect.new()
+	badge_bg.color     = Color(0.08, 0.10, 0.16)
+	badge_bg.position  = pos + Vector2(w - 36, h - 24)
+	badge_bg.size      = Vector2(32, 20)
+	parent.add_child(badge_bg)
+
+	var count_lbl      := Label.new()
+	count_lbl.text      = "0"
+	count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	count_lbl.position  = pos + Vector2(w - 36, h - 24)
+	count_lbl.size      = Vector2(32, 20)
+	count_lbl.add_theme_font_size_override("font_size", 12)
+	count_lbl.add_theme_color_override("font_color", C_GOLD)
+	parent.add_child(count_lbl)
+
+	# Cell separator line (right edge)
+	var divider      := ColorRect.new()
+	divider.color     = C_BORDER
+	divider.position  = pos + Vector2(w - 1, 0)
+	divider.size      = Vector2(1, h)
+	parent.add_child(divider)
+
+	# Bottom separator line
+	var divider_b      := ColorRect.new()
+	divider_b.color     = C_BORDER
+	divider_b.position  = pos + Vector2(0, h - 1)
+	divider_b.size      = Vector2(w, 1)
+	parent.add_child(divider_b)
+
+	# Tap button
+	var btn      := Button.new()
+	btn.flat      = true
+	btn.position  = pos
+	btn.size      = Vector2(w, h)
+	parent.add_child(btn)
+	btn.pressed.connect(func() -> void:
+		_toolbox_selected = item_id
+		_update_toolbox_panel()
+	)
+
+	_toolbox_cells.append({
+		"item_id":   item_id,
+		"cell_bg":   cell_bg,
+		"count_lbl": count_lbl,
+	})
+
+
+func _update_toolbox_panel() -> void:
+	for ref: Dictionary in _toolbox_cells:
+		var iid : String    = ref["item_id"]
+		var cnt : int       = int(GameState.inventory.get(iid, 0))
+		ref["count_lbl"].text = str(cnt)
+		var bg  : ColorRect = ref["cell_bg"]
+		bg.color = Color(0.20, 0.22, 0.30) if iid == _toolbox_selected else C_CARD
+
+	if _toolbox_selected.is_empty():
+		_lbl_tb_item_name.text  = "Select an item"
+		_lbl_tb_item_desc.text  = ""
+		_lbl_tb_item_count.text = ""
+		_btn_tb_use.disabled    = true
+		_btn_tb_buy.disabled    = true
+		return
+
+	var item := ToolboxDatabase.get_item(_toolbox_selected)
+	if item.is_empty():
+		return
+
+	var owned : int = int(GameState.inventory.get(_toolbox_selected, 0))
+	var cost  : int = int(item.get("gem_cost", 1))
+
+	_lbl_tb_item_name.text = item.get("name", "")
+	_lbl_tb_item_name.add_theme_color_override("font_color", item.get("color", Color.WHITE))
+	_lbl_tb_item_desc.text  = item.get("desc", "")
+	_lbl_tb_item_count.text = "Owned: %d" % owned
+
+	_btn_tb_use.text     = "USE  (%d owned)" % owned
+	_btn_tb_use.disabled = owned <= 0
+
+	_btn_tb_buy.text     = "BUY  ◆%d" % cost
+	_btn_tb_buy.disabled = GameState.gems < cost
+
+
+func _on_use_item() -> void:
+	if _toolbox_selected.is_empty(): return
+	var owned : int = int(GameState.inventory.get(_toolbox_selected, 0))
+	if owned <= 0: return
+
+	var item := ToolboxDatabase.get_item(_toolbox_selected)
+	if item.is_empty(): return
+
+	GameState.inventory[_toolbox_selected] = owned - 1
+
+	var effect   : String = item.get("effect", "")
+	var duration : int    = int(item.get("duration", 0))
+	var mult     : float  = float(item.get("mult", 1.0))
+	var flat     : int    = int(item.get("flat", 0))
+
+	if effect == "instant_wave":
+		var loc_id : String = GameState.active_location_id
+		var nodes  : Array  = GameState.location_nodes.get(loc_id, [])
+		for i: int in nodes.size():
+			nodes[i] = {"node_id": "", "hp": 0.0, "max_hp": 0.0}
+		_spawn_wave(loc_id)
+		_refresh_mine_visuals(loc_id)
+		_flash_feedback("TNT! Wave cleared instantly.")
+	elif duration > 0:
+		var expires_at := Time.get_unix_time_from_system() + float(duration)
+		GameState.active_boosts[effect] = {
+			"mult":       mult,
+			"flat":       flat,
+			"expires_at": expires_at,
+		}
+		_update_boost_strip()
+		_flash_feedback("%s active for %ds!" % [item.get("name", ""), duration])
+
+	_update_toolbox_panel()
+	_update_hud()
+
+
+func _on_buy_item() -> void:
+	if _toolbox_selected.is_empty(): return
+	var item := ToolboxDatabase.get_item(_toolbox_selected)
+	if item.is_empty(): return
+
+	var cost : int = int(item.get("gem_cost", 1))
+	if GameState.gems < cost: return
+
+	GameState.gems -= cost
+	var iid : String = item.get("id", "")
+	GameState.inventory[iid] = int(GameState.inventory.get(iid, 0)) + 1
+
+	_update_toolbox_panel()
+	_update_hud()
+
+
+func _on_menu_toolbox() -> void:
+	_close_all_panels()
+	if _toolbox_selected.is_empty() and not ToolboxDatabase.get_all().is_empty():
+		_toolbox_selected = ToolboxDatabase.get_all()[0].get("id", "")
+	_update_toolbox_panel()
+	_toolbox_panel.visible = true
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Boost strip (thin overlay showing active boost timers)
+func _build_toolbox_float_btn() -> void:
+	const BTN_W    := 60
+	const BTN_H    := 60
+	const MARGIN   := 10
+	const BTN_X    : int = SCREEN_W - BTN_W - MARGIN          # 650
+	const BTN_Y    : int = MINE_Y + MINE_H - BTN_H - MARGIN - 90  # above info strip
+
+	_toolbox_float_cl        = CanvasLayer.new()
+	_toolbox_float_cl.name   = "ToolboxFloat"
+	_toolbox_float_cl.layer  = 9    # above boost strip (8), below HUD (10)
+	add_child(_toolbox_float_cl)
+
+	# Orange background square
+	var bg      := ColorRect.new()
+	bg.color     = Color(0.90, 0.50, 0.20)
+	bg.position  = Vector2(BTN_X, BTN_Y)
+	bg.size      = Vector2(BTN_W, BTN_H)
+	_toolbox_float_cl.add_child(bg)
+
+	# Inner dark inset
+	var inset      := ColorRect.new()
+	inset.color     = Color(0.0, 0.0, 0.0, 0.22)
+	inset.position  = Vector2(BTN_X + 3, BTN_Y + 3)
+	inset.size      = Vector2(BTN_W - 6, BTN_H - 6)
+	_toolbox_float_cl.add_child(inset)
+
+	# Symbol
+	var lbl      := Label.new()
+	lbl.text      = "⚒"
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	lbl.position  = Vector2(BTN_X, BTN_Y)
+	lbl.size      = Vector2(BTN_W, BTN_H)
+	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	_toolbox_float_cl.add_child(lbl)
+
+	# "TOOLS" sub-label
+	var sub      := Label.new()
+	sub.text      = "TOOLS"
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.position  = Vector2(BTN_X - MARGIN, BTN_Y + BTN_H + 2)
+	sub.size      = Vector2(BTN_W + MARGIN * 2, 18)
+	sub.add_theme_font_size_override("font_size", 10)
+	sub.add_theme_color_override("font_color", Color(0.90, 0.60, 0.30))
+	_toolbox_float_cl.add_child(sub)
+
+	# Tap button covering the square
+	var btn      := Button.new()
+	btn.flat      = true
+	btn.position  = Vector2(BTN_X, BTN_Y)
+	btn.size      = Vector2(BTN_W, BTN_H)
+	_toolbox_float_cl.add_child(btn)
+	btn.pressed.connect(_on_menu_toolbox)
+
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_boost_strip() -> void:
+	_boost_strip         = CanvasLayer.new()
+	_boost_strip.name    = "BoostStrip"
+	_boost_strip.layer   = 8
+	_boost_strip.visible = false
+	add_child(_boost_strip)
+
+	var strip_bg      := ColorRect.new()
+	strip_bg.color     = Color(0.05, 0.06, 0.10, 0.88)
+	strip_bg.position  = Vector2(0, MINE_Y)
+	strip_bg.size      = Vector2(SCREEN_W, 28)
+	_boost_strip.add_child(strip_bg)
+
+	_boost_chip_box = HBoxContainer.new()
+	_boost_chip_box.position = Vector2(6, MINE_Y + 4)
+	_boost_chip_box.size     = Vector2(SCREEN_W - 12, 20)
+	_boost_chip_box.add_theme_constant_override("separation", 6)
+	_boost_strip.add_child(_boost_chip_box)
+
+
+func _update_boost_strip() -> void:
+	if not _boost_chip_box: return
+
+	for child: Node in _boost_chip_box.get_children():
+		_boost_chip_box.remove_child(child)
+		child.queue_free()
+
+	var now        := Time.get_unix_time_from_system()
+	var has_active := false
+
+	for effect_type: String in GameState.active_boosts.keys():
+		var b       : Dictionary = GameState.active_boosts[effect_type]
+		var expires : float      = float(b.get("expires_at", 0))
+		if now >= expires:
+			continue
+		has_active = true
+		var secs_left : int = int(expires - now)
+
+		var chip_color := Color(0.60, 0.60, 0.70)
+		var chip_sym   := effect_type.left(1).to_upper()
+		for it: Dictionary in ToolboxDatabase.get_all():
+			if it.get("effect", "") == effect_type:
+				chip_color = it.get("color", chip_color)
+				chip_sym   = it.get("symbol", chip_sym)
+				break
+
+		var chip      := ColorRect.new()
+		chip.color     = chip_color.darkened(0.55)
+		chip.custom_minimum_size = Vector2(72, 20)
+		_boost_chip_box.add_child(chip)
+
+		var chip_lbl      := Label.new()
+		chip_lbl.text      = "%s %ds" % [chip_sym, secs_left]
+		chip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		chip_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		chip_lbl.position  = Vector2.ZERO
+		chip_lbl.size      = Vector2(72, 20)
+		chip_lbl.add_theme_font_size_override("font_size", 12)
+		chip_lbl.add_theme_color_override("font_color", chip_color)
+		chip.add_child(chip_lbl)
+
+	_boost_strip.visible = has_active
 
 # ══════════════════════════════════════════════════════════════════════════
 # Display refresh

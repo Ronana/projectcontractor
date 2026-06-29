@@ -470,4 +470,57 @@ Nothing — all above is complete.
 3. Break nodes → check collect_mat / break_nodes progress increments
 4. CLAIM a completed mission → cash/gems awarded
 5. Commit once testing passes
-6. Pending: "Extra Node Slot" upgrade wiring in UPGRADES panel
+6. ~~Pending: "Extra Node Slot" upgrade wiring in UPGRADES panel~~ — Done (see below)
+
+---
+
+## 2026-06-29 — Extra Node Slot upgrade
+
+### Completed this session
+- Added `extra_node_slot` to `UpgradeDatabase.UPGRADES`: unlock level 7, max 4 levels, +1 node/level, base cost 60 timber + 40 stone (doubles per level)
+- Post-buy hook in `_on_upgrade_buy()`: when `upgrade_id == "extra_node_slot"`, sets `GameState.active_node_count = 1 + new_level`, pads all location node arrays with best available nodes for the player's current level, then calls `_refresh_mine_visuals()` to show the new slot immediately
+- `SaveManager` already saves/loads `active_node_count` and pads arrays on load — no changes needed there
+- Cap enforced by `max_level: 4` matching `MAX_NODES = 5` in Main.gd
+
+### Next step
+Test in Godot: reach player level 7, open UPGRADES, buy Extra Node Slot — a second node should appear on the mine screen immediately. Buy again for 3, 4, 5 nodes.
+
+---
+
+## 2026-06-29 — Toolbox / Inventory system
+
+### Completed this session
+
+**Supporting autoloads (all new)**
+- `ToolboxDatabase.gd`: defines 8 consumable items (energy_drink, speed_brew, rush_contract, xp_crystal, material_surge, cash_surge, tnt_charge, mega_blast) — each with effect type, mult/flat, duration, gem cost, symbol, rarity, colour
+- `GameState.gd`: added `inventory: Dictionary` (item_id → count) and `active_boosts: Dictionary` (effect_type → {mult, flat, expires_at}); added `get_boost_mult()` / `get_boost_flat()` helpers that auto-expire stale entries; wired all 6 stat helpers to apply boosts (`get_mine_power`, `get_worker_rate_mult`, `get_drop_bonus`, `get_xp_mult`, `get_build_power`, `get_stage_cash_mult`)
+- `SaveManager.gd`: saves/loads `inventory` and `active_boosts`; `_init_fresh_state` zeroes both
+- `project.godot`: `ToolboxDatabase` registered after `MissionManager` in autoload order
+
+**Main.gd — TOOLBOX panel (new functions)**
+- `_build_toolbox_panel()`: CanvasLayer layer=23; 3-column × 3-row item grid (240×110 per cell) + detail footer; header colour `(0.90, 0.50, 0.20)`
+- `_make_toolbox_cell()`: per-item cell with rarity left-strip, coloured symbol square, name/cost labels, count badge (bottom-right), invisible tap button that sets `_toolbox_selected`
+- `_update_toolbox_panel()`: refreshes count badges, selection highlight (blue tint), detail footer (name in item colour, desc, owned count, USE/BUY buttons with correct enable states)
+- `_on_use_item()`: consumes 1 from inventory; for `instant_wave` clears all current-location node slots and calls `_spawn_wave()`; for timed boosts writes to `GameState.active_boosts` with `expires_at`
+- `_on_buy_item()`: deducts gems, increments `inventory[item_id]`
+- `_on_menu_toolbox()`: `_close_all_panels()` + auto-selects first item + shows panel
+
+**Main.gd — Boost strip (thin overlay)**
+- `_build_boost_strip()`: CanvasLayer layer=8 (below HUD), 28px strip at `MINE_Y`; `HBoxContainer` for chips
+- `_update_boost_strip()`: rebuilds chips from `GameState.active_boosts`; each chip shows symbol + seconds remaining in item's colour; strip hidden when no boosts active; called on item use and every 1 s from `_process()`
+
+**MORE menu / shortcuts**
+- `SHORTCUT_DEFS` now has 12 entries including `"toolbox"` (orange)
+- MORE menu grid expanded to 3×4 (11 items): MINE, BUILD, CRAFT, SELL, CREW, SKYLINE, UPGRADES, CONTRACT, SHOP, MISSIONS, TOOLBOX
+
+### Currently in progress / left mid-task
+Nothing — all functions implemented.
+
+### Next step
+1. Open Godot, confirm 0 parser errors
+2. Open TOOLBOX from the MORE menu or quick bar — 8 item cells should appear in a 3-column grid
+3. Tap a cell — detail footer updates with item name, desc, owned count; BUY button shows gem cost
+4. Buy an item (need gems) — count badge increments, USE button enables
+5. Use a timed boost — boost strip appears at top of mine area with countdown chip
+6. Use TNT Charge — all nodes clear and respawn immediately
+7. Commit once testing passes

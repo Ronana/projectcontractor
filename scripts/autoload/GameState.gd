@@ -73,18 +73,44 @@ var daily_reset_at:  float = 0.0
 ## Unix timestamp of next weekly reset.
 var weekly_reset_at: float = 0.0
 
+# -- Toolbox -----------------------------------------------------------------
+## Owned item counts: item_id → count.
+var inventory: Dictionary = {}
+## Active temporary boosts: effect_type → {mult, flat, expires_at}.
+var active_boosts: Dictionary = {}
+
 # -- Save metadata -----------------------------------------------------------
 var last_saved_timestamp: float = 0.0
 
 # ---------------------------------------------------------------------------
+## Returns the active boost multiplier for an effect type, or 1.0 if none/expired.
+func get_boost_mult(boost_type: String) -> float:
+	if not active_boosts.has(boost_type):
+		return 1.0
+	var b: Dictionary = active_boosts[boost_type]
+	if Time.get_unix_time_from_system() >= float(b.get("expires_at", 0)):
+		active_boosts.erase(boost_type)
+		return 1.0
+	return float(b.get("mult", 1.0))
+
+## Returns the active flat boost for an effect type, or 0 if none/expired.
+func get_boost_flat(boost_type: String) -> int:
+	if not active_boosts.has(boost_type):
+		return 0
+	var b: Dictionary = active_boosts[boost_type]
+	if Time.get_unix_time_from_system() >= float(b.get("expires_at", 0)):
+		active_boosts.erase(boost_type)
+		return 0
+	return int(b.get("flat", 0))
+
 ## Derived stat: sum of all hired crew member levels,
-## multiplied by the Power Tools upgrade bonus.
+## multiplied by the Power Tools upgrade bonus and any active build_power boost.
 func get_build_power() -> int:
 	var total := 0
 	for member: Dictionary in crew:
 		total += int(member.get("level", 1))
 	var mult := 1.0 + UpgradeDatabase.get_total_bonus("power_tools", upgrades.get("power_tools", 0))
-	return max(int(float(total) * mult), 0)
+	return max(int(float(total) * mult * get_boost_mult("build_power")), 0)
 
 ## Derived stat: damage per tap to ore nodes.
 ## Stacks Sharper Tools upgrade + Veteran Foreman artifact.
@@ -92,28 +118,31 @@ func get_mine_power() -> int:
 	var base := player_level * 2
 	var mult := 1.0 + UpgradeDatabase.get_total_bonus("sharper_tools", upgrades.get("sharper_tools", 0))
 	mult *= 1.0 + ArtifactDatabase.get_total_bonus("veteran_foreman", artifacts.get("veteran_foreman", 0))
-	return max(int(float(base) * mult), 1)
+	return max(int(float(base) * mult * get_boost_mult("mine_power")), 1)
 
-## Multiplier applied to worker HP/s from the Quick Crew upgrade.
+## Multiplier applied to worker HP/s from the Quick Crew upgrade + active boost.
 func get_worker_rate_mult() -> float:
-	return 1.0 + UpgradeDatabase.get_total_bonus("quick_crew", upgrades.get("quick_crew", 0))
+	return (1.0 + UpgradeDatabase.get_total_bonus("quick_crew", upgrades.get("quick_crew", 0))) \
+		* get_boost_mult("worker_rate")
 
-## Flat bonus drops per node break. Stacks Bonus Drop upgrade + Quality Materials artifact.
+## Flat bonus drops per node break. Stacks Bonus Drop upgrade + artifact + active boost.
 func get_drop_bonus() -> int:
 	var upgrade_bonus  := int(UpgradeDatabase.get_total_bonus("bonus_drop", upgrades.get("bonus_drop", 0)))
 	var artifact_bonus := int(ArtifactDatabase.get_total_bonus("quality_materials", artifacts.get("quality_materials", 0)))
-	return upgrade_bonus + artifact_bonus
+	return upgrade_bonus + artifact_bonus + get_boost_flat("drop_bonus")
 
-## XP multiplier. Stacks XP Rush upgrade + Fast Learner artifact.
+## XP multiplier. Stacks XP Rush upgrade + Fast Learner artifact + active boost.
 func get_xp_mult() -> float:
 	var base := 1.0 + UpgradeDatabase.get_total_bonus("xp_rush", upgrades.get("xp_rush", 0))
-	return base * (1.0 + ArtifactDatabase.get_total_bonus("fast_learner", artifacts.get("fast_learner", 0)))
+	return base * (1.0 + ArtifactDatabase.get_total_bonus("fast_learner", artifacts.get("fast_learner", 0))) \
+		* get_boost_mult("xp_mult")
 
 ## Cash multiplier applied to stage completion rewards.
-## Stacks Cash Bonus upgrade + Site Reputation artifact.
+## Stacks Cash Bonus upgrade + Site Reputation artifact + active boost.
 func get_stage_cash_mult() -> float:
 	var base := 1.0 + UpgradeDatabase.get_total_bonus("cash_bonus", upgrades.get("cash_bonus", 0))
-	return base * (1.0 + ArtifactDatabase.get_total_bonus("site_reputation", artifacts.get("site_reputation", 0)))
+	return base * (1.0 + ArtifactDatabase.get_total_bonus("site_reputation", artifacts.get("site_reputation", 0))) \
+		* get_boost_mult("stage_cash")
 
 ## Chance (0.0–1.0) to yield 2× output when crafting.
 func get_double_craft_chance() -> float:

@@ -55,6 +55,9 @@ func save_game() -> void:
 		"weekly_missions":       GameState.weekly_missions,
 		"daily_reset_at":        GameState.daily_reset_at,
 		"weekly_reset_at":       GameState.weekly_reset_at,
+		# -- Toolbox --
+		"inventory":             GameState.inventory,
+		"active_boosts":         GameState.active_boosts,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -119,6 +122,10 @@ func load_game() -> void:
 	GameState.daily_reset_at      = float(d.get("daily_reset_at",  0.0))
 	GameState.weekly_reset_at     = float(d.get("weekly_reset_at", 0.0))
 
+	# -- Toolbox --
+	GameState.inventory           = d.get("inventory",     {})
+	GameState.active_boosts       = d.get("active_boosts", {})
+
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
 		if not member.has("location_id") or member["location_id"] == "":
@@ -143,7 +150,9 @@ func load_game() -> void:
 		while nodes.size() < GameState.active_node_count:
 			var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
 			if best.is_empty(): break
-			nodes.append({"node_id": best.get("id",""), "hp": float(best.get("hp",10))})
+			var base_hp: float = float(best.get("hp", 10))
+			var hp: float = roundf(base_hp * randf_range(0.8, 1.2))
+			nodes.append({"node_id": best.get("id",""), "hp": hp, "max_hp": hp})
 
 # ---------------------------------------------------------------------------
 func _init_fresh_state() -> void:
@@ -165,6 +174,8 @@ func _init_fresh_state() -> void:
 	GameState.artifacts            = {}
 	GameState.last_saved_timestamp = Time.get_unix_time_from_system()
 	GameState.pinned_shortcuts     = ["build", "crew", "craft", "sell"]
+	GameState.inventory            = {}
+	GameState.active_boosts        = {}
 
 ## Reset all temporary state for a New Contract (prestige).
 ## rep_earned is added to the permanent reputation_points total.

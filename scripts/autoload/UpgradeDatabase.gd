@@ -26,7 +26,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 1,
 		"effect":       "mine_power_pct",
 		"bonus":        0.10,
-		"base_cost":    {"timber": 20},
+		"base_cost":    {"cash": 25, "timber": 20},
 	},
 	{
 		"id":           "cash_bonus",
@@ -36,7 +36,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 2,
 		"effect":       "stage_cash_pct",
 		"bonus":        0.10,
-		"base_cost":    {"cash": 30},
+		"base_cost":    {"cash": 35, "stone": 20},
 	},
 	{
 		"id":           "quick_crew",
@@ -46,7 +46,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 3,
 		"effect":       "worker_rate_pct",
 		"bonus":        0.08,
-		"base_cost":    {"stone": 20},
+		"base_cost":    {"cash": 40, "stone": 25},
 	},
 	{
 		"id":           "power_tools",
@@ -56,7 +56,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 4,
 		"effect":       "build_power_pct",
 		"bonus":        0.10,
-		"base_cost":    {"lumber": 10},
+		"base_cost":    {"cash": 60, "lumber": 15},
 	},
 	{
 		"id":           "bonus_drop",
@@ -66,7 +66,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 5,
 		"effect":       "drop_bonus",
 		"bonus":        1.0,
-		"base_cost":    {"timber": 40},
+		"base_cost":    {"cash": 50, "timber": 35},
 	},
 	{
 		"id":           "xp_rush",
@@ -76,7 +76,17 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 6,
 		"effect":       "xp_pct",
 		"bonus":        0.15,
-		"base_cost":    {"timber": 30, "stone": 30},
+		"base_cost":    {"cash": 60, "timber": 20, "stone": 20},
+	},
+	{
+		"id":           "extra_node_slot",
+		"name":         "Extra Node Slot",
+		"description":  "+1 active mine node per level (max 5 total)",
+		"max_level":    4,
+		"unlock_level": 7,
+		"effect":       "extra_node_slot",
+		"bonus":        1.0,
+		"base_cost":    {"cash": 80, "timber": 50, "stone": 30},
 	},
 	{
 		"id":           "double_craft",
@@ -86,7 +96,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 8,
 		"effect":       "double_craft_chance",
 		"bonus":        0.05,
-		"base_cost":    {"lumber": 15},
+		"base_cost":    {"cash": 80, "lumber": 15},
 	},
 	{
 		"id":           "fast_build",
@@ -96,7 +106,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 10,
 		"effect":       "build_progress_pct",
 		"bonus":        0.05,
-		"base_cost":    {"concrete": 10},
+		"base_cost":    {"cash": 100, "concrete": 12},
 	},
 ]
 
