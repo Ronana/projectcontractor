@@ -39,9 +39,11 @@ var player_xp: float = 0.0
 # -- Mining ------------------------------------------------------------------
 ## Which location is currently selected on the Mine screen.
 var active_location_id: String = "lumber_yard"
-## Per-location node state: { loc_id: { "node_id": String, "hp": float } }
-## Persisted so workers continue damaging nodes even while app is closed.
+## Per-location node state: { loc_id: Array[{ "node_id": String, "hp": float }] }
+## Each location holds active_node_count entries. Persisted for offline worker progress.
 var location_nodes: Dictionary = {}
+## How many nodes are active per location simultaneously (upgradeable, starts at 1).
+var active_node_count: int = 1
 
 # -- Upgrades ----------------------------------------------------------------
 ## Keys: upgrade_id (String) -> purchased level (int, 0 = not bought).
@@ -60,6 +62,16 @@ var artifacts: Dictionary = {}
 # -- UI preferences (survive prestige, never reset) -------------------------
 ## Shortcut IDs pinned to the quick bar (up to 4). Not reset on New Contract.
 var pinned_shortcuts: Array = ["build", "crew", "craft", "sell"]
+
+# -- Missions ----------------------------------------------------------------
+## Active daily missions: Array of Dicts (see MissionManager for schema).
+var daily_missions:  Array = []
+## Active weekly missions.
+var weekly_missions: Array = []
+## Unix timestamp of next daily reset.
+var daily_reset_at:  float = 0.0
+## Unix timestamp of next weekly reset.
+var weekly_reset_at: float = 0.0
 
 # -- Save metadata -----------------------------------------------------------
 var last_saved_timestamp: float = 0.0

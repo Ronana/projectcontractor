@@ -354,7 +354,120 @@ Build the game in Godot and test in LDPlayer:
 - File recovery is complete. Godot needs to reload and confirm 0 parser errors.
 
 ### Next step
-1. Open Godot — let it reimport `Main.gd`
-2. Check Output/Errors panel: expect 0 parser errors
-3. If clean, test the UI improvements on device/LDPlayer
-4. Continue UI polish as desired
+Commit current work, then continue UI polish or gameplay features.
+
+---
+
+## 2026-06-28 — Multi-node mine screen
+
+### Completed this session
+- **GameState**: `location_nodes[loc_id]` changed from single `{node_id, hp}` dict to `Array[{node_id, hp}]`. Added `active_node_count: int = 1` (upgradeable).
+- **BuildDatabase**: `get_default_location_nodes()` now returns Array format.
+- **SaveManager**: saves/loads `active_node_count`; migrates old single-dict save format to array on load; pads arrays to `active_node_count` on load.
+- **Main.gd — mine area rewrite**:
+  - Removed single centered card (ColorRect box). Old vars gone: `_node_border`, `_node_rect`, `_node_accent_bar`, `_lbl_node_symbol`, `_lbl_node_name`, `_hp_bar_bg`, `_hp_bar_fill`, `_lbl_hp_left`, `_lbl_hp_right`.
+  - Added `MAX_NODES = 5` visual pool (`_node_visuals: Array`).
+  - Themed shapes per material (code-drawn ColorRect stacks): timber → layered pine tree, stone → rock pile, sand → pyramid mound, steel_ore → industrial tower.
+  - Each node visual has its own mini HP bar (96px wide, colour-coded green/gold/red).
+  - `_refresh_mine_visuals()`: rebuilds all node shapes, assigns random scattered positions within mine area using grid+jitter.
+  - `_update_mine_hps()`: fast path (HP bars only) called every damage tick.
+  - `_flash_node_hit()`: bounce-scale tween on hit node.
+  - `_apply_node_damage()`: targets lowest-HP node (focus-fire model).
+  - `_break_node()`: respawns in-place at new random position, calls `_refresh_mine_visuals()`.
+  - `_on_level_up()`: upgrades all node types, resets visual positions for fresh scatter.
+  - `_update_mine_screen()`: calls `_refresh_mine_visuals()` on location change (resets positions), `_update_mine_hps()` on every tick.
+  - Info strip (mat count + mine rate) pinned to bottom of mine area.
+
+### Next step (from previous session)
+1. Load in Godot — confirm 0 parser errors
+2. Test on LDPlayer: nodes appear scattered, HP bars deplete, nodes respawn at new positions on break
+3. Add "Extra Node" upgrade to UPGRADES panel (increments `GameState.active_node_count`, pads `location_nodes` arrays, calls `_refresh_mine_visuals`)
+
+---
+
+## 2026-06-29 — Panel texture + offline gains popup
+
+### Completed this session
+- **`PANEL_TEX_PATH` constant** added: `res://assets/sprites/ui/panel_grey_bolts_detail_a.svg`
+- **`_build_panel_header()` updated**: now adds a full-panel `NinePatchRect` (9-patch margins 16px, modulate `Color(0.65,0.70,0.78,0.14)`) behind every panel header, giving all 8 panels a subtle industrial bolt-corner texture overlay.
+- **Offline gains popup** (`_build_offline_popup`, `_show_offline_popup`, `_on_offline_collect`):
+  - Built at startup (CanvasLayer layer 45), replaces the old one-liner `_flash_feedback` call.
+  - Shows a centred card (600×560) with the bolt-texture NinePatchRect at higher opacity (0.30).
+  - Gold "WELCOME BACK" header + accent strip.
+  - Time-away line: "You were away for Xh Ym" or "X minutes".
+  - Per-material rows: colour swatch, material name, `+N` amount in material's accent colour.
+  - Gold "COLLECT" button dismisses popup and calls `_update_display()`.
+  - `_check_offline_summary()` reduced to 3 lines — just calls `_show_offline_popup()`.
+- File grew from 3474 → 3674 lines (no truncation).
+
+### Currently in progress / left mid-task
+Nothing — implementation complete. Needs Godot reload + LDPlayer test.
+
+### Next step
+1. Close Main.gd in Godot editor (prevents truncation race), then reopen project.
+2. Confirm 0 parser errors.
+3. Test offline popup: close game, wait 15 s, reopen — "WELCOME BACK" popup should appear with gained materials.
+4. Still pending: "Extra Node Slot" upgrade in UPGRADES panel.
+5. Still pending: git commit for this session.
+
+---
+
+## 2026-06-29 — Sprite system, crew reassignment, number formatting, missions
+
+### Completed this session
+
+**Sprite system (lumber yard + stone quarry)**
+- `NODE_SPRITES` const: 12-entry arrays for `timber` and `stone` (small/tall/thin × NE/NW/SE/SW PNGs)
+- `_setup_node_vis()` now picks a random path from the pool, loads it as `Texture2D`, spawns a `Sprite2D` child with `randf_range(0.8, 1.3)` scale instead of a `ColorRect` shape stack
+- `_make_empty_node_vis()` adds `"sprite": null` to the ref dict; HP bar pushed to y=72, label to y=86
+- Sprite scale bug fixed (initial 0.16–0.26 was too small; 512×512 canvas has small content area)
+
+**Visual tweaks to nodes**
+- `_flash_node_hit()`: tween durations slowed to 0.12 / 0.22 s (was 0.06 / 0.10)
+- `_update_mine_hp_bar()`: label shows HP number (`"%d" % int(hp)`) instead of node name; label colour forced to `Color.WHITE`
+
+**Location picker colour-coding**
+- `_mat_color()` extended to all 13 materials (was only 4)
+- Material name label and accent strip in SELECT LOCATION panel now use `_mat_color(mat_id)` for per-material colouring
+
+**Crew panel scroll + card layout**
+- `ScrollContainer` (y=130, h=SCREEN_H-130-BOTTOM_BAR_H) wrapping a `Control` added to `_build_crew_panel()`
+- `_crew_scroll_content` holds all cards; `custom_minimum_size` set to `templates.size() * 210 + 20` height
+- `card_y` changed from `135 + idx*210` → `idx*210 + 8`; all `add_child` calls rerouted to `_crew_scroll_content`
+- Level-up button width: 350 → 218 px
+
+**Crew reassignment UI**
+- Added "▶ MOVE" button (x=554, w=122) to each hired crew card
+- `_build_crew_loc_picker()`: new CanvasLayer (layer=25) — full-screen dim + card + bolt-texture + title + 8 location rows each with colour strip
+- `_on_crew_move_pressed(crew_id)` / `_on_crew_loc_selected(loc_id)`: updates `member["location_id"]` and `member["material_type"]` in GameState.crew
+- `_update_crew_panel()` refreshes `_crew_loc_labels` and `_crew_move_btns` visibility
+
+**All 9 crew registered in BuildDatabase**
+- Restored missing `_register_crew()` (file was truncated at line 366): copper_carl, lime_larry, boxy_dave added alongside existing 6
+- Locations: lumber_yard (old_bob, nimble_nick), stone_quarry (granite_pete), sand_pit (sandy_walsh), steel_yard (iron_mike), clay_pit (clay_molly), copper_mine (copper_carl), limestone_quarry (lime_larry), bauxite_mine (boxy_dave)
+
+**Number formatting (`_fmt`)**
+- `_fmt(n: int) -> String`: thresholds at 10K/1M/1B with one decimal place
+- Applied to: HUD cash/gems, XP bar, mine mat count, sell panel (have + earnings), craft panel (inventory + yield), build requirements (have/need), upgrade costs, crew hire/upgrade text
+
+**Daily / weekly missions**
+- `MissionManager.gd` autoload: 10-entry daily pool + 8-entry weekly pool; picks 3 daily / 2 weekly via deterministic RNG seeded to day/week number; auto-resets at UTC midnight / Sunday midnight
+- `GameState`: `daily_missions`, `weekly_missions`, `daily_reset_at`, `weekly_reset_at` vars added
+- `SaveManager`: saves and loads all four mission vars; `_init_fresh_state` leaves them at defaults for MissionManager to populate
+- `MissionManager` registered as autoload after ArtifactDatabase in project.godot
+- `SHORTCUT_DEFS`: `"missions"` entry added (symbol M, gold colour); MORE menu expanded to 3×4 (10 items)
+- `_build_missions_panel()`: CanvasLayer layer=22, scrollable VBox, section headers with countdown labels, 5 mission cards (3 daily, 2 weekly) with progress bar, reward label, CLAIM button
+- `_update_missions_panel()`: fills cards from `GameState.daily_missions + weekly_missions`; accent colours per mission type; CLAIM button enables when progress ≥ target
+- Progress hooks added: `_break_node()` → `collect_mat + break_nodes`, `_complete_stage()` → `complete_stages`, `_on_sell_pressed()` → `sell_cash`, `_on_craft_one/all()` → `craft_items`
+- Countdown labels refresh every second while missions panel is open (via `_process`)
+
+### Currently in progress / left mid-task
+Nothing — all above is complete.
+
+### Next step
+1. Open Godot, confirm 0 parser errors
+2. Test missions: open MISSIONS from quick bar or MORE menu, daily/weekly missions should appear
+3. Break nodes → check collect_mat / break_nodes progress increments
+4. CLAIM a completed mission → cash/gems awarded
+5. Commit once testing passes
+6. Pending: "Extra Node Slot" upgrade wiring in UPGRADES panel

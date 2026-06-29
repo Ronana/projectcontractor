@@ -23,6 +23,7 @@ SaveManager="*res://scripts/autoload/SaveManager.gd"
 OfflineProgressCalculator="*res://scripts/autoload/OfflineProgressCalculator.gd"
 UpgradeDatabase="*res://scripts/autoload/UpgradeDatabase.gd"
 ArtifactDatabase="*res://scripts/autoload/ArtifactDatabase.gd"
+MissionManager="*res://scripts/autoload/MissionManager.gd"
 
 [display]
 

@@ -40,6 +40,7 @@ func save_game() -> void:
 		"player_xp":             GameState.player_xp,
 		"active_location_id":    GameState.active_location_id,
 		"location_nodes":        GameState.location_nodes,
+			"active_node_count":      GameState.active_node_count,
 		"upgrades":              GameState.upgrades,
 		# -- Permanent (survive New Contract reset) --
 		"reputation_points":     GameState.reputation_points,
@@ -49,6 +50,11 @@ func save_game() -> void:
 		"last_saved_timestamp":  now,
 		# -- UI preferences (permanent, survive prestige) --
 		"pinned_shortcuts":      GameState.pinned_shortcuts,
+		# -- Missions --
+		"daily_missions":        GameState.daily_missions,
+		"weekly_missions":       GameState.weekly_missions,
+		"daily_reset_at":        GameState.daily_reset_at,
+		"weekly_reset_at":       GameState.weekly_reset_at,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -107,20 +113,37 @@ func load_game() -> void:
 	GameState.artifacts           = d.get("artifacts", {})
 	GameState.pinned_shortcuts    = d.get("pinned_shortcuts", ["build", "crew", "craft", "sell"])
 
+	# -- Missions (loaded but MissionManager will regenerate if timestamps expired) --
+	GameState.daily_missions      = d.get("daily_missions",  [])
+	GameState.weekly_missions     = d.get("weekly_missions", [])
+	GameState.daily_reset_at      = float(d.get("daily_reset_at",  0.0))
+	GameState.weekly_reset_at     = float(d.get("weekly_reset_at", 0.0))
+
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
 		if not member.has("location_id") or member["location_id"] == "":
 			var mat: String = member.get("material_type", "timber")
 			member["location_id"] = "stone_quarry" if mat == "stone" else "lumber_yard"
 
-	# Load location_nodes; fill any missing locations from BuildDatabase defaults
+	GameState.active_node_count = int(d.get("active_node_count", 1))
+
+	# Load location_nodes; migrate old single-dict format → array; fill missing from defaults
 	var saved_nodes: Dictionary = d.get("location_nodes", {})
 	var defaults := BuildDatabase.get_default_location_nodes()
 	for loc_id: String in defaults.keys():
 		if saved_nodes.has(loc_id):
-			GameState.location_nodes[loc_id] = saved_nodes[loc_id]
+			var val = saved_nodes[loc_id]
+			# Migrate v4 single-dict → array
+			GameState.location_nodes[loc_id] = [val] if val is Dictionary else val
 		else:
 			GameState.location_nodes[loc_id] = defaults[loc_id]
+	# Pad each location's node array to match active_node_count
+	for loc_id: String in GameState.location_nodes.keys():
+		var nodes: Array = GameState.location_nodes[loc_id]
+		while nodes.size() < GameState.active_node_count:
+			var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
+			if best.is_empty(): break
+			nodes.append({"node_id": best.get("id",""), "hp": float(best.get("hp",10))})
 
 # ---------------------------------------------------------------------------
 func _init_fresh_state() -> void:
@@ -133,6 +156,7 @@ func _init_fresh_state() -> void:
 	GameState.player_level         = 1
 	GameState.player_xp            = 0.0
 	GameState.active_location_id   = "lumber_yard"
+	GameState.active_node_count    = 1
 	GameState.location_nodes       = BuildDatabase.get_default_location_nodes()
 	GameState.upgrades             = {}
 	GameState.reputation_points    = 0

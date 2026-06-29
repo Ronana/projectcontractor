@@ -36,6 +36,7 @@ const SHORTCUT_DEFS: Array = [
 	{"id": "upgrades", "label": "UPGRADES", "symbol": "+"},
 	{"id": "contract", "label": "CONTRACT", "symbol": "R"},
 	{"id": "shop",     "label": "SHOP",     "symbol": "◆"},
+	{"id": "missions", "label": "MISSIONS", "symbol": "M"},
 ]
 
 # ── Colour palette ─────────────────────────────────────────────────────────
@@ -53,6 +54,46 @@ const C_SAND       := Color(0.88, 0.78, 0.45)
 const C_STEEL_ORE  := Color(0.60, 0.65, 0.72)
 const C_GLASS      := Color(0.55, 0.88, 0.95)
 const C_STEEL_BEAM := Color(0.45, 0.52, 0.65)
+
+const PANEL_TEX_PATH := "res://assets/sprites/ui/panel_grey_bolts_detail_a.svg"
+
+## Sprite pools per material. Add an entry here when art is available.
+## Each node picks a random sprite at a random scale on every spawn/respawn.
+const NODE_SPRITES: Dictionary = {
+	"timber": [
+		"res://assets/sprites/materials/lumber_yard/tree_small_NE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_small_NW.png",
+		"res://assets/sprites/materials/lumber_yard/tree_small_SE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_small_SW.png",
+		"res://assets/sprites/materials/lumber_yard/tree_tall_NE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_tall_NW.png",
+		"res://assets/sprites/materials/lumber_yard/tree_tall_SE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_tall_SW.png",
+		"res://assets/sprites/materials/lumber_yard/tree_thin_NE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_thin_NW.png",
+		"res://assets/sprites/materials/lumber_yard/tree_thin_SE.png",
+		"res://assets/sprites/materials/lumber_yard/tree_thin_SW.png",
+	],
+	"stone": [
+		"res://assets/sprites/materials/stone_quarry/stone_largeF_NE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_largeF_NW.png",
+		"res://assets/sprites/materials/stone_quarry/stone_largeF_SE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_largeF_SW.png",
+		"res://assets/sprites/materials/stone_quarry/stone_smallE_NE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_smallE_NW.png",
+		"res://assets/sprites/materials/stone_quarry/stone_smallE_SE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_smallE_SW.png",
+		"res://assets/sprites/materials/stone_quarry/stone_tallE_NE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_tallE_NW.png",
+		"res://assets/sprites/materials/stone_quarry/stone_tallE_SE.png",
+		"res://assets/sprites/materials/stone_quarry/stone_tallE_SW.png",
+	],
+	# Add other materials here as sprites become available:
+	# "sand":      [ "res://assets/sprites/materials/sand_pit/..." ],
+	# "steel_ore": [ "res://assets/sprites/materials/steel_yard/..." ],
+	# "sand":      [ "res://assets/sprites/materials/sand_pit/..." ],
+	# "steel_ore": [ "res://assets/sprites/materials/steel_yard/..." ],
+}
 const C_CLAY       := Color(0.80, 0.48, 0.28)
 const C_COPPER_ORE := Color(0.72, 0.45, 0.20)
 const C_LIMESTONE  := Color(0.85, 0.82, 0.70)
@@ -80,15 +121,8 @@ var _xp_bar_fill:    ColorRect
 var _lbl_active_loc:   Label            # active location name in the bar
 var _loc_bar_accent:   ColorRect        # coloured underline strip
 var _loc_picker_panel: CanvasLayer      # vertical location picker overlay
-var _node_rect:        ColorRect   # inner fill
-var _node_border:      ColorRect   # outer border
-var _node_accent_bar:  ColorRect   # top colour strip
-var _lbl_node_symbol:  Label       # big letter "T" / "S"
-var _lbl_node_name:    Label       # "Sapling", "Pebble", etc.
-var _lbl_hp_left:      Label       # "HP" label (left)
-var _lbl_hp_right:     Label       # "8.0 / 10" (right)
-var _hp_bar_bg:        ColorRect
-var _hp_bar_fill:      ColorRect
+const MAX_NODES := 5                # visual pool; active count driven by GameState.active_node_count
+var _node_visuals: Array = []       # Array[Dictionary] – one slot per possible node
 var _lbl_mat_count:    Label
 var _lbl_mine_rate:    Label
 var _lbl_feedback:     Label
@@ -129,6 +163,11 @@ var _crew_levelup_btns:   Array[Button]    = []
 var _crew_level_labels:   Array[Label]     = []
 var _crew_rate_labels:    Array[Label]     = []
 var _crew_progress_fills: Array[ColorRect] = []
+var _crew_scroll_content:  Control
+var _crew_loc_labels:      Array[Label]  = []   # current location per card
+var _crew_move_btns:       Array[Button] = []   # "▶ MOVE" per card
+var _crew_loc_picker:      CanvasLayer           # location-reassign overlay
+var _crew_loc_picker_for:  String = ""           # crew id being reassigned
 
 # ── Craft panel refs ───────────────────────────────────────────────────────
 var _craft_panel:      CanvasLayer
@@ -179,6 +218,17 @@ var _btn_stage_skip: Button
 # Per-location worker HP-damage accumulator (smooth sub-integer ticking)
 var _worker_dmg_accum: Dictionary = {}
 
+# ── Offline popup refs ─────────────────────────────────────────────────────
+var _offline_popup:    CanvasLayer
+var _offline_rows_box: VBoxContainer
+var _lbl_offline_time: Label
+
+# ── Missions panel refs ─────────────────────────────────────────────────────
+var _missions_panel:      CanvasLayer
+var _mission_card_refs:   Array = []   # [{prog_bar, prog_lbl, claim_btn, mission_id}]
+var _lbl_daily_countdown: Label
+var _lbl_weekly_countdown: Label
+
 # ══════════════════════════════════════════════════════════════════════════
 # Lifecycle
 # ══════════════════════════════════════════════════════════════════════════
@@ -203,11 +253,37 @@ func _ready() -> void:
 	_build_contract_panel()
 	_build_prestige_confirm_panel()
 	_build_shop_panel()
+	_build_offline_popup()
+	_build_missions_panel()
+	MissionManager.missions_changed.connect(_update_missions_panel)
 	_update_display()
 	_check_offline_summary()
+	_apply_global_font()
+
+func _apply_global_font() -> void:
+	var bold := load("res://assets/fonts/Rajdhani-Bold.ttf")     as FontFile
+	var semi := load("res://assets/fonts/Rajdhani-SemiBold.ttf") as FontFile
+	if not bold or not semi:
+		push_warning("Rajdhani fonts not found — using default font")
+		return
+	for lbl: Label  in find_children("*", "Label",  true, false):
+		lbl.add_theme_font_override("font", bold)
+	for btn: Button in find_children("*", "Button", true, false):
+		btn.add_theme_font_override("font", semi)
+
+var _mission_countdown_timer: float = 0.0
 
 func _process(delta: float) -> void:
 	_tick_workers(delta)
+	# Refresh mission countdown labels every second while panel is open
+	if _missions_panel and _missions_panel.visible:
+		_mission_countdown_timer += delta
+		if _mission_countdown_timer >= 1.0:
+			_mission_countdown_timer = 0.0
+			if _lbl_daily_countdown:
+				_lbl_daily_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.daily_reset_at)
+			if _lbl_weekly_countdown:
+				_lbl_weekly_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.weekly_reset_at)
 
 # ══════════════════════════════════════════════════════════════════════════
 # Scene construction
@@ -356,6 +432,19 @@ func _apply_btn_style(btn: Button, bg: Color, fg: Color = Color.WHITE, radius: i
 ## Builds a standard panel header: coloured top strip, dark bg, bottom separator,
 ## centred title, styled close button. Returns the close button for signal connection.
 func _build_panel_header(parent: Node, title_text: String, accent: Color) -> Button:
+	# Full-panel bolt-texture background overlay
+	var _pt := load(PANEL_TEX_PATH) as Texture2D
+	if _pt:
+		var np := NinePatchRect.new()
+		np.texture             = _pt
+		np.position            = Vector2.ZERO
+		np.size                = Vector2(SCREEN_W, SCREEN_H)
+		np.patch_margin_left   = 16
+		np.patch_margin_right  = 16
+		np.patch_margin_top    = 16
+		np.patch_margin_bottom = 16
+		np.modulate            = Color(0.65, 0.70, 0.78, 0.14)
+		parent.add_child(np)
 	# Dark header background
 	var header      := ColorRect.new()
 	header.color     = Color(0.07, 0.08, 0.13)
@@ -401,6 +490,173 @@ func _build_panel_header(parent: Node, title_text: String, accent: Color) -> But
 	return close_btn
 
 # ── Location selector bar ───────────────────────────────────────────────────
+# ── Node visual helpers ──────────────────────────────────────────────────────
+
+func _make_empty_node_vis() -> Dictionary:
+	# Creates the persistent hp bar + label objects (not yet added to any container)
+	var c       := Node2D.new()
+	var hp_bg   := ColorRect.new()
+	var hp_fill := ColorRect.new()
+	var lbl     := Label.new()
+	hp_bg.color     = Color(0.06, 0.06, 0.10)
+	hp_bg.position  = Vector2(-48, 72)
+	hp_bg.size      = Vector2(96, 10)
+	hp_fill.color     = C_GREEN
+	hp_fill.position  = Vector2(-48, 72)
+	hp_fill.size      = Vector2(96, 10)
+	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl.position = Vector2(-56, 86)
+	lbl.size     = Vector2(112, 22)
+	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_color_override("font_color", Color.WHITE)
+	return { "container": c, "parts": [], "sprite": null, "hp_bg": hp_bg,
+			 "hp_fill": hp_fill, "lbl": lbl, "max_hp": 10.0,
+			 "pos": Vector2(-1.0, -1.0) }
+
+func _setup_node_vis(vis: Dictionary, mat: String, node_name: String,
+		accent: Color, max_hp: float) -> void:
+	var c: Node2D = vis["container"]
+	# Free previous ColorRect shape parts
+	for p: ColorRect in vis["parts"]:
+		p.queue_free()
+	vis["parts"].clear()
+	# Free previous sprite if any
+	if vis.get("sprite") != null:
+		vis["sprite"].queue_free()
+		vis["sprite"] = null
+	# Remove hp overlay so visuals go beneath it
+	if vis["hp_bg"].get_parent()   == c: c.remove_child(vis["hp_bg"])
+	if vis["hp_fill"].get_parent() == c: c.remove_child(vis["hp_fill"])
+	if vis["lbl"].get_parent()     == c: c.remove_child(vis["lbl"])
+	# ── Sprite-based visual ──────────────────────────────────────────────────
+	var sprite_paths: Array = NODE_SPRITES.get(mat, [])
+	if not sprite_paths.is_empty():
+		var path: String = sprite_paths[randi() % sprite_paths.size()]
+		var tex := load(path) as Texture2D
+		if tex:
+			var sp       := Sprite2D.new()
+			sp.texture    = tex
+			sp.scale      = Vector2.ONE * randf_range(0.8, 1.3)
+			c.add_child(sp)
+			vis["sprite"] = sp
+	# ── Fallback: themed ColorRect shapes ────────────────────────────────────
+	else:
+		var shapes := _node_shape_parts(mat, accent)
+		for s in shapes: c.add_child(s)
+		vis["parts"] = shapes
+	# Re-add hp bar + label on top
+	c.add_child(vis["hp_bg"])
+	c.add_child(vis["hp_fill"])
+	c.add_child(vis["lbl"])
+	vis["max_hp"]   = max_hp
+
+func _node_shape_parts(mat: String, accent: Color) -> Array:
+	match mat:
+		"timber":
+			return [
+				_cr(Vector2( -8,  14), Vector2(16, 46), accent.darkened(0.55)),  # trunk
+				_cr(Vector2(-44, -20), Vector2(88, 36), accent.darkened(0.22)),  # base canopy
+				_cr(Vector2(-30, -52), Vector2(60, 34), accent),                 # mid canopy
+				_cr(Vector2(-18, -82), Vector2(36, 32), accent.lightened(0.15)), # top canopy
+			]
+		"stone":
+			return [
+				_cr(Vector2(-46,  -2), Vector2(54, 48), Color(0.38, 0.38, 0.41)),
+				_cr(Vector2( -6,   0), Vector2(50, 44), Color(0.48, 0.48, 0.51)),
+				_cr(Vector2(-26, -50), Vector2(54, 52), Color(0.45, 0.45, 0.48)),
+			]
+		"sand":
+			return [
+				_cr(Vector2(-50,  10), Vector2(100, 18), accent.darkened(0.28)),
+				_cr(Vector2(-36, -14), Vector2( 72, 26), accent),
+				_cr(Vector2(-22, -40), Vector2( 44, 28), accent.lightened(0.10)),
+				_cr(Vector2(-12, -62), Vector2( 24, 24), accent.lightened(0.22)),
+			]
+		"steel_ore":
+			return [
+				_cr(Vector2(-44,   4), Vector2(88, 16), accent.darkened(0.30)),  # base
+				_cr(Vector2(-34, -72), Vector2(18, 78), accent),                 # left pillar
+				_cr(Vector2( 16, -72), Vector2(18, 78), accent),                 # right pillar
+				_cr(Vector2(-34, -40), Vector2(68, 12), accent.lightened(0.12)), # crossbeam
+				_cr(Vector2(-20, -92), Vector2(40, 22), accent.darkened(0.12)),  # cap
+			]
+		_:
+			return [_cr(Vector2(-38, -50), Vector2(76, 72), accent)]
+
+## Shorthand ColorRect factory used by _node_shape_parts.
+func _cr(pos: Vector2, sz: Vector2, col: Color) -> ColorRect:
+	var r := ColorRect.new()
+	r.position = pos
+	r.size     = sz
+	r.color    = col
+	return r
+
+func _random_mine_pos(slot_idx: int, total: int) -> Vector2:
+	var x_min := 80.0
+	var x_max := 640.0
+	var y_min := float(MINE_Y) + 100.0
+	var y_max := float(MINE_Y + MINE_H) - 200.0
+	var cols  := clampi(total, 1, 3)
+	var rows  := ceili(float(total) / float(cols))
+	var col   := slot_idx % cols
+	var row   := slot_idx / cols
+	var cw    := (x_max - x_min) / float(cols)
+	var ch    := (y_max - y_min) / float(rows)
+	var cx    := x_min + cw * (float(col) + 0.5) + randf_range(-cw * 0.22, cw * 0.22)
+	var cy    := y_min + ch * (float(row) + 0.5) + randf_range(-ch * 0.22, ch * 0.22)
+	return Vector2(cx, cy)
+
+func _refresh_mine_visuals(loc_id: String) -> void:
+	var loc_data := BuildDatabase.get_location(loc_id)
+	var mat: String  = loc_data.get("material", "timber")
+	var accent       := _mat_color(mat)
+	var nodes: Array = GameState.location_nodes.get(loc_id, [])
+	var count        := nodes.size()
+	for i in MAX_NODES:
+		var vis: Dictionary = _node_visuals[i]
+		if i < count:
+			var nd: Dictionary    = nodes[i]
+			var node_id: String   = nd.get("node_id", "")
+			var node_data         := BuildDatabase.get_node_data(node_id)
+			var max_hp: float     = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+			var node_name: String = node_data.get("name", node_id) if not node_data.is_empty() else node_id
+			_setup_node_vis(vis, mat, node_name, accent, max_hp)
+			# Assign position: reuse stored pos or generate a new one
+			var p: Vector2 = vis.get("pos", Vector2(-1.0, -1.0))
+			if p.x < 0.0:
+				p = _random_mine_pos(i, count)
+				vis["pos"] = p
+			vis["container"].position = p
+			_update_mine_hp_bar(vis, float(nd.get("hp", max_hp)), max_hp)
+			vis["container"].visible = true
+		else:
+			vis["container"].visible = false
+
+func _update_mine_hps(loc_id: String) -> void:
+	var loc_data := BuildDatabase.get_location(loc_id)
+	var mat: String  = loc_data.get("material", "timber")
+	var accent       := _mat_color(mat)
+	var nodes: Array = GameState.location_nodes.get(loc_id, [])
+	for i in mini(nodes.size(), MAX_NODES):
+		var nd: Dictionary = nodes[i]
+		var node_id: String = nd.get("node_id", "")
+		var node_data := BuildDatabase.get_node_data(node_id)
+		var max_hp: float = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
+		_update_mine_hp_bar(_node_visuals[i], float(nd.get("hp", max_hp)), max_hp)
+
+func _update_mine_hp_bar(vis: Dictionary, hp: float, max_hp: float) -> void:
+	var pct: float = minf(hp / max_hp, 1.0)
+	vis["hp_fill"].size.x = 96.0 * pct
+	vis["hp_fill"].color  = C_GREEN if pct > 0.6 else (C_GOLD if pct > 0.3 else C_RED)
+	vis["lbl"].text       = "%d" % int(hp)
+
+func _flash_node_hit(slot_idx: int) -> void:
+	if slot_idx >= _node_visuals.size(): return
+	var c: Node2D = _node_visuals[slot_idx]["container"]
+	var tw := create_tween()
+	tw.tween_property(c, "scale", Vector2(1.12, 1.12), 0.12)
+	tw.tween_property(c, "scale", Vector2(1.0,  1.0),  0.22)
+
 func _build_location_bar() -> void:
 	var bg      := ColorRect.new()
 	bg.color     = Color(0.07, 0.08, 0.13, 0.72)
@@ -581,105 +837,37 @@ func _build_backdrop() -> void:
 	cl.add_child(_mine_backdrop)
 
 func _build_mine_area() -> void:
-	# Overlay to keep mine card text readable against bright backdrops
+	# Dim overlay over backdrop
 	var overlay      := ColorRect.new()
-	overlay.color     = Color(0.0, 0.0, 0.0, 0.40)
+	overlay.color     = Color(0.0, 0.0, 0.0, 0.28)
 	overlay.position  = Vector2(0, MINE_Y)
 	overlay.size      = Vector2(SCREEN_W, MINE_H)
 	add_child(overlay)
 
-	# ── Node visual (centered card) ─────────────────────────────────────────
-	# Card: x=210, y=MINE_Y+90, size=300×280
-	var card_x := 210
-	var card_y := MINE_Y + 90
+	# Node visual pool — MAX_NODES containers, shown/hidden by active_node_count
+	for _i in MAX_NODES:
+		var vis := _make_empty_node_vis()
+		vis["container"].visible = false
+		add_child(vis["container"])
+		_node_visuals.append(vis)
 
-	_node_border         = ColorRect.new()
-	_node_border.color   = C_BORDER
-	_node_border.position = Vector2(card_x, card_y)
-	_node_border.size     = Vector2(300, 280)
-	add_child(_node_border)
-
-	_node_rect           = ColorRect.new()
-	_node_rect.color     = Color(0.12, 0.09, 0.06)
-	_node_rect.position  = Vector2(card_x + 4, card_y + 4)
-	_node_rect.size      = Vector2(292, 272)
-	add_child(_node_rect)
-
-	_node_accent_bar         = ColorRect.new()
-	_node_accent_bar.color   = C_TIMBER
-	_node_accent_bar.position = Vector2(card_x, card_y)
-	_node_accent_bar.size     = Vector2(300, 6)
-	add_child(_node_accent_bar)
-
-	_lbl_node_symbol                      = Label.new()
-	_lbl_node_symbol.text                 = "T"
-	_lbl_node_symbol.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_node_symbol.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_lbl_node_symbol.position             = Vector2(card_x, card_y + 20)
-	_lbl_node_symbol.size                 = Vector2(300, 180)
-	_lbl_node_symbol.add_theme_font_size_override("font_size", 80)
-	_lbl_node_symbol.add_theme_color_override("font_color", C_TIMBER)
-	add_child(_lbl_node_symbol)
-
-	_lbl_node_name                      = Label.new()
-	_lbl_node_name.text                 = "Sapling"
-	_lbl_node_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_node_name.position             = Vector2(card_x, card_y + 200)
-	_lbl_node_name.size                 = Vector2(300, 34)
-	_lbl_node_name.add_theme_font_size_override("font_size", 16)
-	_lbl_node_name.add_theme_color_override("font_color", C_DIM)
-	add_child(_lbl_node_name)
-
-	# ── HP bar (below node card) ────────────────────────────────────────────
-	var hp_y := card_y + 300
-
-	_lbl_hp_left                      = Label.new()
-	_lbl_hp_left.text                 = "HP"
-	_lbl_hp_left.position             = Vector2(50, hp_y - 30)
-	_lbl_hp_left.size                 = Vector2(200, 26)
-	_lbl_hp_left.add_theme_color_override("font_color", C_DIM)
-	add_child(_lbl_hp_left)
-
-	_lbl_hp_right                      = Label.new()
-	_lbl_hp_right.text                 = "10 / 10"
-	_lbl_hp_right.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	_lbl_hp_right.position             = Vector2(470, hp_y - 30)
-	_lbl_hp_right.size                 = Vector2(200, 26)
-	_lbl_hp_right.add_theme_color_override("font_color", C_DIM)
-	add_child(_lbl_hp_right)
-
-	_hp_bar_bg         = ColorRect.new()
-	_hp_bar_bg.color   = Color(0.12, 0.12, 0.18)
-	_hp_bar_bg.position = Vector2(50, hp_y)
-	_hp_bar_bg.size     = Vector2(620, 18)
-	add_child(_hp_bar_bg)
-
-	_hp_bar_fill         = ColorRect.new()
-	_hp_bar_fill.color   = C_GREEN
-	_hp_bar_fill.position = Vector2(50, hp_y)
-	_hp_bar_fill.size     = Vector2(620, 18)
-	add_child(_hp_bar_fill)
-
-	# ── Info labels below HP bar ────────────────────────────────────────────
+	# Info strip pinned to bottom of mine area
 	_lbl_mat_count                      = Label.new()
-	_lbl_mat_count.text                 = "Timber: 0"
 	_lbl_mat_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_mat_count.position             = Vector2(0, hp_y + 28)
+	_lbl_mat_count.position             = Vector2(0, MINE_Y + MINE_H - 80)
 	_lbl_mat_count.size                 = Vector2(SCREEN_W, 34)
 	_lbl_mat_count.add_theme_font_size_override("font_size", 18)
-	_lbl_mat_count.add_theme_color_override("font_color", C_TIMBER)
 	add_child(_lbl_mat_count)
 
 	_lbl_mine_rate                      = Label.new()
-	_lbl_mine_rate.text                 = "Mine Power: 2  ·  Workers: 0 HP/s"
 	_lbl_mine_rate.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_mine_rate.position             = Vector2(0, hp_y + 68)
+	_lbl_mine_rate.position             = Vector2(0, MINE_Y + MINE_H - 44)
 	_lbl_mine_rate.size                 = Vector2(SCREEN_W, 30)
 	_lbl_mine_rate.add_theme_font_size_override("font_size", 13)
 	_lbl_mine_rate.add_theme_color_override("font_color", C_DIM)
 	add_child(_lbl_mine_rate)
 
-	# ── Floating feedback label (damage / XP numbers) ───────────────────────
+	# Floating feedback label
 	_lbl_feedback                      = Label.new()
 	_lbl_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_feedback.position             = Vector2(0, MINE_Y + 30)
@@ -689,7 +877,7 @@ func _build_mine_area() -> void:
 	_lbl_feedback.add_theme_color_override("font_color", C_GOLD)
 	add_child(_lbl_feedback)
 
-	# ── Full-area invisible tap button ──────────────────────────────────────
+	# Full-area tap button (sits over everything in the mine zone)
 	var tap_btn      := Button.new()
 	tap_btn.flat      = true
 	tap_btn.position  = Vector2(0, MINE_Y)
@@ -866,7 +1054,7 @@ func _build_menu_overlay() -> void:
 	card_top.size      = Vector2(card_w, 4)
 	_menu_overlay.add_child(card_top)
 
-	# Menu items: 3 columns × 3 rows (MINE + 8 shortcuts = 9)
+	# Menu items: 3 columns × 4 rows (MINE + 9 shortcuts = 10, padded to 12)
 	var items: Array = [
 		["MINE",     C_TIMBER,  _on_menu_mine],
 		["BUILD",    C_ACCENT,  _on_menu_build],
@@ -877,9 +1065,10 @@ func _build_menu_overlay() -> void:
 		["UPGRADES", C_XP,      _on_menu_upgrades],
 		["CONTRACT", C_GOLD,    _on_menu_contract],
 		["SHOP",     C_GEM,     _on_shop_btn_pressed],
+		["MISSIONS", C_GOLD,    _on_menu_missions],
 	]
 	var cols      := 3
-	var rows      := 3
+	var rows      := 4
 	var pad       := 16
 	# Reserve 72 px at bottom for the Edit Bar strip
 	var edit_zone := 72
@@ -1258,11 +1447,24 @@ func _build_crew_panel() -> void:
 	_crew_panel.add_child(_lbl_crew_bp)
 
 	var templates := BuildDatabase.get_hireable_crew()
+
+	# Scrollable area for cards (starts below the BP label)
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, 130)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - 130 - BOTTOM_BAR_H)
+	_crew_panel.add_child(scroll)
+
+	_crew_scroll_content = Control.new()
+	_crew_scroll_content.custom_minimum_size = Vector2(SCREEN_W, templates.size() * 210 + 20)
+	scroll.add_child(_crew_scroll_content)
+
 	for i in templates.size():
 		_build_crew_card(templates[i], i)
 
+	_build_crew_loc_picker()
+
 func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
-	var card_y    := 135 + idx * 210
+	var card_y    := idx * 210 + 8
 	var card_h    := 192
 	var mat_color := _mat_color(template.material_type)
 
@@ -1270,20 +1472,20 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	bg.color     = C_CARD
 	bg.position  = Vector2(14, card_y)
 	bg.size      = Vector2(SCREEN_W - 28, card_h)
-	_crew_panel.add_child(bg)
+	_crew_scroll_content.add_child(bg)
 
 	var left_bar      := ColorRect.new()
 	left_bar.color     = mat_color
 	left_bar.position  = Vector2(14, card_y)
 	left_bar.size      = Vector2(5, card_h)
-	_crew_panel.add_child(left_bar)
+	_crew_scroll_content.add_child(left_bar)
 
 	# Avatar
 	var av_bg      := ColorRect.new()
 	av_bg.color     = mat_color.darkened(0.55)
 	av_bg.position  = Vector2(28, card_y + 14)
 	av_bg.size      = Vector2(58, 58)
-	_crew_panel.add_child(av_bg)
+	_crew_scroll_content.add_child(av_bg)
 
 	var av_lbl     := Label.new()
 	av_lbl.text     = template.display_name.left(1)
@@ -1293,7 +1495,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	av_lbl.size     = Vector2(58, 58)
 	av_lbl.add_theme_font_size_override("font_size", 26)
 	av_lbl.add_theme_color_override("font_color", mat_color)
-	_crew_panel.add_child(av_lbl)
+	_crew_scroll_content.add_child(av_lbl)
 
 	# Name
 	var name_lbl     := Label.new()
@@ -1302,7 +1504,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	name_lbl.size     = Vector2(300, 32)
 	name_lbl.add_theme_font_size_override("font_size", 18)
 	name_lbl.add_theme_color_override("font_color", C_TEXT)
-	_crew_panel.add_child(name_lbl)
+	_crew_scroll_content.add_child(name_lbl)
 
 	# Location badge (top-right)
 	var loc_data := BuildDatabase.get_location(template.location_id)
@@ -1314,7 +1516,8 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	loc_lbl.size     = Vector2(258, 26)
 	loc_lbl.add_theme_font_size_override("font_size", 12)
 	loc_lbl.add_theme_color_override("font_color", mat_color)
-	_crew_panel.add_child(loc_lbl)
+	_crew_scroll_content.add_child(loc_lbl)
+	_crew_loc_labels.append(loc_lbl)
 
 	# Rate label
 	var rate_lbl     := Label.new()
@@ -1323,7 +1526,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	rate_lbl.position = Vector2(100, card_y + 50)
 	rate_lbl.size     = Vector2(578, 28)
 	rate_lbl.add_theme_color_override("font_color", C_DIM)
-	_crew_panel.add_child(rate_lbl)
+	_crew_scroll_content.add_child(rate_lbl)
 	_crew_rate_labels.append(rate_lbl)
 
 	# Level label
@@ -1332,43 +1535,196 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	lvl_lbl.position = Vector2(100, card_y + 90)
 	lvl_lbl.size     = Vector2(220, 34)
 	lvl_lbl.add_theme_color_override("font_color", C_DIM)
-	_crew_panel.add_child(lvl_lbl)
+	_crew_scroll_content.add_child(lvl_lbl)
 	_crew_level_labels.append(lvl_lbl)
 
 	# Hire button
 	var hire_btn     := Button.new()
-	hire_btn.text     = "Hire  (%d cash)" % template.hire_cost
+	hire_btn.text     = "Hire  (%s cash)" % _fmt(template.hire_cost)
 	hire_btn.position = Vector2(326, card_y + 88)
 	hire_btn.size     = Vector2(350, 50)
 	hire_btn.pressed.connect(_on_hire_pressed.bind(template.id))
 	_apply_btn_style(hire_btn, C_GREEN.darkened(0.35))
-	_crew_panel.add_child(hire_btn)
+	_crew_scroll_content.add_child(hire_btn)
 	_crew_hire_btns.append(hire_btn)
 
 	# Level-up button
 	var lvlup_btn     := Button.new()
 	lvlup_btn.text     = "Upgrade"
 	lvlup_btn.position = Vector2(326, card_y + 88)
-	lvlup_btn.size     = Vector2(350, 50)
+	lvlup_btn.size     = Vector2(218, 50)
 	lvlup_btn.visible  = false
 	lvlup_btn.pressed.connect(_on_levelup_pressed.bind(template.id))
 	_apply_btn_style(lvlup_btn, C_GOLD.darkened(0.50), Color(0.12, 0.10, 0.02))
-	_crew_panel.add_child(lvlup_btn)
+	_crew_scroll_content.add_child(lvlup_btn)
 	_crew_levelup_btns.append(lvlup_btn)
+
+	# Move (reassign location) button — visible only when hired
+	var move_btn     := Button.new()
+	move_btn.text     = "▶ MOVE"
+	move_btn.position = Vector2(554, card_y + 88)
+	move_btn.size     = Vector2(122, 50)
+	move_btn.visible  = false
+	move_btn.pressed.connect(_on_crew_move_pressed.bind(template.id))
+	_apply_btn_style(move_btn, C_ACCENT.darkened(0.45))
+	_crew_scroll_content.add_child(move_btn)
+	_crew_move_btns.append(move_btn)
 
 	# Progress bar
 	var pbg     := ColorRect.new()
 	pbg.color    = Color(0.10, 0.10, 0.16)
 	pbg.position = Vector2(14, card_y + card_h - 14)
 	pbg.size     = Vector2(SCREEN_W - 28, 10)
-	_crew_panel.add_child(pbg)
+	_crew_scroll_content.add_child(pbg)
 
 	var pfill     := ColorRect.new()
 	pfill.color    = mat_color.darkened(0.2)
 	pfill.position = Vector2(14, card_y + card_h - 14)
 	pfill.size     = Vector2(0, 10)
-	_crew_panel.add_child(pfill)
+	_crew_scroll_content.add_child(pfill)
 	_crew_progress_fills.append(pfill)
+
+# ── Crew location picker overlay ────────────────────────────────────────────
+func _build_crew_loc_picker() -> void:
+	_crew_loc_picker        = CanvasLayer.new()
+	_crew_loc_picker.layer  = 25
+	_crew_loc_picker.visible = false
+	add_child(_crew_loc_picker)
+
+	# Dim backdrop
+	var dim      := ColorRect.new()
+	dim.color     = Color(0.0, 0.0, 0.0, 0.65)
+	dim.position  = Vector2.ZERO
+	dim.size      = Vector2(SCREEN_W, SCREEN_H)
+	dim.gui_input.connect(func(ev):
+		if ev is InputEventMouseButton and ev.pressed:
+			_crew_loc_picker.visible = false)
+	_crew_loc_picker.add_child(dim)
+
+	# Card
+	const CW := 580
+	const CH := 740
+	var cx := (SCREEN_W - CW) / 2.0
+	var cy := (SCREEN_H - CH) / 2.0
+
+	var card      := ColorRect.new()
+	card.color     = C_PANEL
+	card.position  = Vector2(cx, cy)
+	card.size      = Vector2(CW, CH)
+	_crew_loc_picker.add_child(card)
+
+	# Bolt-texture overlay
+	var pt := load(PANEL_TEX_PATH) as Texture2D
+	if pt:
+		var np := NinePatchRect.new()
+		np.texture             = pt
+		np.position            = Vector2(cx, cy)
+		np.size                = Vector2(CW, CH)
+		np.patch_margin_left   = 16
+		np.patch_margin_right  = 16
+		np.patch_margin_top    = 16
+		np.patch_margin_bottom = 16
+		np.modulate            = Color(0.65, 0.70, 0.78, 0.18)
+		_crew_loc_picker.add_child(np)
+
+	# Top strip + title
+	var strip      := ColorRect.new()
+	strip.color     = C_ACCENT
+	strip.position  = Vector2(cx, cy)
+	strip.size      = Vector2(CW, 4)
+	_crew_loc_picker.add_child(strip)
+
+	var title      := Label.new()
+	title.text      = "ASSIGN LOCATION"
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.position  = Vector2(cx, cy + 10)
+	title.size      = Vector2(CW, 42)
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", C_TEXT)
+	_crew_loc_picker.add_child(title)
+
+	var close_btn      := Button.new()
+	close_btn.text      = "✕"
+	close_btn.flat      = true
+	close_btn.position  = Vector2(cx + CW - 50, cy + 8)
+	close_btn.size      = Vector2(42, 34)
+	close_btn.add_theme_color_override("font_color", C_DIM)
+	close_btn.pressed.connect(func(): _crew_loc_picker.visible = false)
+	_crew_loc_picker.add_child(close_btn)
+
+	# Separator
+	var sep      := ColorRect.new()
+	sep.color     = C_BORDER
+	sep.position  = Vector2(cx, cy + 54)
+	sep.size      = Vector2(CW, 2)
+	_crew_loc_picker.add_child(sep)
+
+	# Location rows
+	var row_y := cy + 62.0
+	for loc_id: String in BuildDatabase.LOCATION_ORDER:
+		var ld     := BuildDatabase.get_location(loc_id)
+		var mat    := ld.get("material", "timber") as String
+		var dname  := ld.get("display_name", loc_id) as String
+		var col    := _mat_color(mat)
+
+		var row_btn      := Button.new()
+		row_btn.flat      = true
+		row_btn.position  = Vector2(cx, row_y)
+		row_btn.size      = Vector2(CW, 76)
+		row_btn.pressed.connect(_on_crew_loc_selected.bind(loc_id))
+		_crew_loc_picker.add_child(row_btn)
+
+		# Colour strip
+		var lstrip      := ColorRect.new()
+		lstrip.color     = col
+		lstrip.position  = Vector2(0, 10)
+		lstrip.size      = Vector2(5, 56)
+		row_btn.add_child(lstrip)
+
+		# Location name
+		var nlbl      := Label.new()
+		nlbl.text      = dname
+		nlbl.position  = Vector2(18, 10)
+		nlbl.size      = Vector2(CW - 28, 34)
+		nlbl.add_theme_font_size_override("font_size", 16)
+		nlbl.add_theme_color_override("font_color", C_TEXT)
+		row_btn.add_child(nlbl)
+
+		# Material sub-label
+		var mlbl      := Label.new()
+		mlbl.text      = mat.replace("_", " ").capitalize()
+		mlbl.position  = Vector2(18, 44)
+		mlbl.size      = Vector2(CW - 28, 24)
+		mlbl.add_theme_font_size_override("font_size", 12)
+		mlbl.add_theme_color_override("font_color", col)
+		row_btn.add_child(mlbl)
+
+		# Divider
+		var div      := ColorRect.new()
+		div.color     = C_BORDER
+		div.position  = Vector2(cx, row_y + 76)
+		div.size      = Vector2(CW, 1)
+		_crew_loc_picker.add_child(div)
+
+		row_y += 77.0
+
+func _on_crew_move_pressed(crew_id: String) -> void:
+	_crew_loc_picker_for   = crew_id
+	_crew_loc_picker.visible = true
+
+func _on_crew_loc_selected(loc_id: String) -> void:
+	_crew_loc_picker.visible = false
+	if _crew_loc_picker_for.is_empty():
+		return
+	var member := _crew_member_dict(_crew_loc_picker_for)
+	if member.is_empty():
+		return
+	var ld := BuildDatabase.get_location(loc_id)
+	var mat: String = ld.get("material", "timber")
+	member["location_id"]   = loc_id
+	member["material_type"] = mat
+	_crew_loc_picker_for = ""
+	_update_crew_panel()
 
 # ── Craft overlay panel ─────────────────────────────────────────────────────
 func _build_craft_panel() -> void:
@@ -2404,6 +2760,7 @@ func _close_all_panels() -> void:
 	_contract_panel.visible        = false
 	_prestige_confirm_panel.visible = false
 	_shop_panel.visible            = false
+	_missions_panel.visible        = false
 	_menu_overlay.visible          = false
 	_loc_picker_panel.visible      = false
 	_pin_panel.visible             = false
@@ -2429,6 +2786,7 @@ func _shortcut_color(id: String) -> Color:
 		"upgrades": return C_XP
 		"contract": return C_GEM.darkened(0.3)
 		"shop":     return C_GEM
+		"missions": return C_GOLD
 		_:          return C_DIM
 
 ## Return the SHORTCUT_DEFS entry for id, or empty dict if not found.
@@ -2449,6 +2807,7 @@ func _on_shortcut_pressed(id: String) -> void:
 		"upgrades": _on_menu_upgrades()
 		"contract": _on_menu_contract()
 		"shop":     _on_shop_btn_pressed()
+		"missions": _on_menu_missions()
 		"mine":     _on_menu_mine()
 
 ## Open the pin customiser panel (called from the "Edit Quick Bar" button).
@@ -2530,6 +2889,7 @@ func _on_sell_pressed(mat_id: String, qty: int) -> void:
 	var earned: int   = sell_qty * price
 	GameState.materials[mat_id] = have - sell_qty
 	GameState.cash              += earned
+	MissionManager.add_progress("sell_cash", "", earned)
 	_update_sell_panel()
 	_update_hud()
 	_flash_feedback("Sold %d %s  +$ %d" % [sell_qty, mat_id.capitalize(), earned])
@@ -2544,8 +2904,8 @@ func _update_sell_panel() -> void:
 	for i in mats.size():
 		var have: int  = GameState.materials.get(mats[i], 0)
 		var price: int = int(SELL_PRICES.get(mats[i], 1))
-		_sell_inv_lbls[i].text  = "Have: %d" % have
-		_sell_earn_lbls[i].text = "= $ %d" % (have * price)
+		_sell_inv_lbls[i].text  = "Have: %s" % _fmt(have)
+		_sell_earn_lbls[i].text = "= $ %s" % _fmt(have * price)
 
 func _on_menu_upgrades() -> void:
 	_close_all_panels()
@@ -2675,7 +3035,7 @@ func _update_upgrades_panel() -> void:
 					have = GameState.materials.get(mat, 0)
 				if have < needed:
 					can_afford = false
-				parts.append("%d %s" % [needed, mat.capitalize()])
+				parts.append("%s %s" % [_fmt(needed), mat.capitalize()])
 			(card["cost_lbl"] as Label).text = "Cost: " + "  ·  ".join(parts)
 			(card["cost_lbl"] as Label).add_theme_color_override(
 				"font_color", C_GOLD if can_afford else C_RED)
@@ -2721,47 +3081,62 @@ func _on_tap_node() -> void:
 	_apply_node_damage(GameState.active_location_id, float(mp))
 
 func _apply_node_damage(loc_id: String, dmg: float) -> void:
-	var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})
-	if node_state.is_empty():
+	var nodes: Array = GameState.location_nodes.get(loc_id, [])
+	if nodes.is_empty():
 		return
-	var hp: float = float(node_state.get("hp", 0.0)) - dmg
-	if hp <= 0.0:
-		_break_node(loc_id)
+	# Always hit the lowest-HP node (focus-fire for snappy feel)
+	var target_idx := 0
+	var min_hp: float = float(nodes[0].get("hp", 0.0))
+	for i in range(1, nodes.size()):
+		var h: float = float(nodes[i].get("hp", 0.0))
+		if h < min_hp:
+			min_hp = h
+			target_idx = i
+	var new_hp: float = min_hp - dmg
+	if new_hp <= 0.0:
+		_break_node(loc_id, target_idx)
 	else:
-		node_state["hp"] = hp
+		nodes[target_idx]["hp"] = new_hp
 		if loc_id == GameState.active_location_id:
+			_flash_node_hit(target_idx)
 			_update_mine_screen()
 
-func _break_node(loc_id: String) -> void:
-	var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})
-	var node_id: String = node_state.get("node_id", "")
+func _break_node(loc_id: String, node_idx: int) -> void:
+	var nodes: Array = GameState.location_nodes.get(loc_id, [])
+	if node_idx >= nodes.size():
+		return
+	var nd: Dictionary  = nodes[node_idx]
+	var node_id: String = nd.get("node_id", "")
 	var node_data  := BuildDatabase.get_node_data(node_id)
 	var loc_data   := BuildDatabase.get_location(loc_id)
 	var mat: String = loc_data.get("material", "timber")
 
-	var drop_qty: int = int(node_data.get("drop_qty", 1)) if not node_data.is_empty() else 1
-	var xp: float     = float(node_data.get("xp", 2))    if not node_data.is_empty() else 2.0
-
-	# Apply Bonus Drop upgrade
-	var total_drop: int = drop_qty + GameState.get_drop_bonus()
-	# Apply XP Rush upgrade
-	var total_xp: float = xp * GameState.get_xp_mult()
+	var drop_qty: int  = int(node_data.get("drop_qty", 1)) if not node_data.is_empty() else 1
+	var xp: float      = float(node_data.get("xp", 2))    if not node_data.is_empty() else 2.0
+	var total_drop: int  = drop_qty + GameState.get_drop_bonus()
+	var total_xp: float  = xp * GameState.get_xp_mult()
 
 	GameState.materials[mat] = GameState.materials.get(mat, 0) + total_drop
+	MissionManager.add_progress("collect_mat", mat, total_drop)
+	MissionManager.add_progress("break_nodes", "", 1)
 	_gain_xp(total_xp)
 
 	if loc_id == GameState.active_location_id:
 		_flash_feedback("+%d %s   +%.0f XP" % [total_drop, mat.capitalize(), total_xp])
 
-	# Spawn next node (best unlocked for current level)
+	# Respawn in-place: new node, new random position
 	var best_node := BuildDatabase.get_active_node(loc_id, GameState.player_level)
 	if not best_node.is_empty():
-		GameState.location_nodes[loc_id] = {
+		nodes[node_idx] = {
 			"node_id": best_node.get("id", ""),
 			"hp":      float(best_node.get("hp", 10))
 		}
+		# Assign fresh visual position for respawned slot
+		if node_idx < _node_visuals.size():
+			_node_visuals[node_idx]["pos"] = _random_mine_pos(node_idx, nodes.size())
+
 	if loc_id == GameState.active_location_id:
-		_update_mine_screen()
+		_refresh_mine_visuals(loc_id)
 	_update_hud()
 
 func _gain_xp(amount: float) -> void:
@@ -2775,19 +3150,20 @@ func _gain_xp(amount: float) -> void:
 	_update_xp_bar()
 
 func _on_level_up() -> void:
-	# Upgrade any locations that now have a better node available
+	# Upgrade any nodes that now have a better tier available
 	for loc_id: String in GameState.location_nodes.keys():
 		var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
-		if best.is_empty():
-			continue
-		var cur_id: String = GameState.location_nodes[loc_id].get("node_id", "")
-		if best.get("id", "") != cur_id:
-			GameState.location_nodes[loc_id] = {
-				"node_id": best.get("id", ""),
-				"hp":      float(best.get("hp", 10))
-			}
+		if best.is_empty(): continue
+		var nodes: Array = GameState.location_nodes[loc_id]
+		for nd: Dictionary in nodes:
+			if nd.get("node_id", "") != best.get("id", ""):
+				nd["node_id"] = best.get("id", "")
+				nd["hp"]      = float(best.get("hp", 10))
+	# Reset visual positions so upgraded nodes get fresh placement
+	for vis: Dictionary in _node_visuals:
+		vis["pos"] = Vector2(-1.0, -1.0)
 	_flash_feedback("LEVEL UP!   Lv. %d" % GameState.player_level)
-	_update_mine_screen()
+	_refresh_mine_visuals(GameState.active_location_id)
 	_update_hud()
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -2878,6 +3254,7 @@ func _complete_stage() -> void:
 	var reward: int = int(float(25 + stage.stage_order * 10) * GameState.get_stage_cash_mult())
 	GameState.cash += reward
 	GameState.gems += 1
+	MissionManager.add_progress("complete_stages", "", 1)
 
 	var new_idx: int = int(GameState.current_building.get("stage_index", 0)) + 1
 	GameState.current_building["stage_index"]   = new_idx
@@ -2991,10 +3368,25 @@ func _update_crew_panel() -> void:
 
 		var lvlup_cost: int           = tmpl.hire_cost * level
 		_crew_levelup_btns[i].visible  = hired
-		_crew_levelup_btns[i].text     = "Upgrade  (%d cash)" % lvlup_cost
+		_crew_levelup_btns[i].text     = "Upgrade  (%s cash)" % _fmt(lvlup_cost)
 		_crew_levelup_btns[i].disabled = GameState.cash < lvlup_cost
 
 		_crew_progress_fills[i].size.x = fill_w * minf(float(level) / float(MAX_LVL), 1.0)
+
+		# Location label + move button
+		if i < _crew_loc_labels.size():
+			if hired:
+				var cur_loc: String = member.get("location_id", tmpl.location_id)
+				var ld := BuildDatabase.get_location(cur_loc)
+				var col := _mat_color(ld.get("material", tmpl.material_type))
+				_crew_loc_labels[i].text = ld.get("display_name", cur_loc)
+				_crew_loc_labels[i].add_theme_color_override("font_color", col)
+			else:
+				var ld := BuildDatabase.get_location(tmpl.location_id)
+				_crew_loc_labels[i].text = ld.get("display_name", tmpl.location_id)
+				_crew_loc_labels[i].add_theme_color_override("font_color", _mat_color(tmpl.material_type))
+		if i < _crew_move_btns.size():
+			_crew_move_btns[i].visible = hired
 
 # ── Wall panel interaction ──────────────────────────────────────────────────
 func _on_wall_keep_pressed() -> void:
@@ -3063,6 +3455,7 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 	# Double Craft chance
 	var yield_qty := 2 if randf() < GameState.get_double_craft_chance() else 1
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + yield_qty
+	MissionManager.add_progress("craft_items", "", yield_qty)
 	_update_craft_panel()
 
 func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
@@ -3079,13 +3472,14 @@ func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
 			bonus_yield += 1
 	made += bonus_yield
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
+	MissionManager.add_progress("craft_items", "", made)
 	_update_craft_panel()
 
 func _update_craft_panel() -> void:
 	var inv_mats:  Array[String] = ["timber", "stone", "lumber", "concrete"]
 	var inv_names: Array[String] = ["Timber", "Stone", "Lumber", "Concrete"]
 	for i in inv_mats.size():
-		_craft_inv_lbls[i].text = "%s\n%d" % [inv_names[i], GameState.materials.get(inv_mats[i], 0)]
+		_craft_inv_lbls[i].text = "%s\n%s" % [inv_names[i], _fmt(GameState.materials.get(inv_mats[i], 0))]
 
 	var raw_ids:   Array[String] = ["timber", "stone"]
 	var ref_ids:   Array[String] = ["lumber", "concrete"]
@@ -3093,7 +3487,7 @@ func _update_craft_panel() -> void:
 	for i in 2:
 		var have: int     = GameState.materials.get(raw_ids[i], 0)
 		var can_make: int = have / costs[i]
-		_craft_yield_lbls[i].text  = "Will make: %d" % can_make
+		_craft_yield_lbls[i].text  = "Will make: %s" % _fmt(can_make)
 		_craft1_btns[i].disabled   = have < costs[i]
 		_craftall_btns[i].disabled = have < costs[i]
 
@@ -3116,6 +3510,231 @@ func _on_stage_skip_pressed() -> void:
 	_complete_stage()
 
 # ══════════════════════════════════════════════════════════════════════════
+# Missions panel
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_missions_panel() -> void:
+	_missions_panel         = CanvasLayer.new()
+	_missions_panel.name    = "MissionsPanel"
+	_missions_panel.layer   = 22
+	_missions_panel.visible = false
+	add_child(_missions_panel)
+
+	var bg      := ColorRect.new()
+	bg.color     = C_PANEL
+	bg.position  = Vector2.ZERO
+	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
+	_missions_panel.add_child(bg)
+
+	var close_btn := _build_panel_header(_missions_panel, "MISSIONS", C_GOLD)
+	close_btn.pressed.connect(func() -> void: _missions_panel.visible = false)
+
+	# Scrollable content
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, 82)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 82)
+	_missions_panel.add_child(scroll)
+
+	var vbox      := VBoxContainer.new()
+	vbox.add_theme_constant_override("separation", 0)
+	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	scroll.add_child(vbox)
+
+	# ── Daily section ─────────────────────────────────────────────────────
+	var daily_hdr := _make_mission_section_header(vbox, "DAILY MISSIONS", C_GOLD)
+	_lbl_daily_countdown = daily_hdr
+
+	for i in MissionManager.DAILY_COUNT:
+		_mission_card_refs.append(_make_mission_card(vbox, true, i))
+
+	# ── Weekly section ────────────────────────────────────────────────────
+	var weekly_hdr := _make_mission_section_header(vbox, "WEEKLY MISSIONS", C_GEM)
+	_lbl_weekly_countdown = weekly_hdr
+
+	for i in MissionManager.WEEKLY_COUNT:
+		_mission_card_refs.append(_make_mission_card(vbox, false, i))
+
+	# Bottom padding
+	var pad      := Control.new()
+	pad.custom_minimum_size = Vector2(SCREEN_W, 24)
+	vbox.add_child(pad)
+
+## Returns the countdown Label so we can store it.
+func _make_mission_section_header(parent: VBoxContainer, title: String, accent: Color) -> Label:
+	var hdr      := ColorRect.new()
+	hdr.color     = Color(0.07, 0.08, 0.14)
+	hdr.custom_minimum_size = Vector2(SCREEN_W, 56)
+	parent.add_child(hdr)
+
+	var strip      := ColorRect.new()
+	strip.color     = accent
+	strip.position  = Vector2(0, 0)
+	strip.size      = Vector2(SCREEN_W, 3)
+	hdr.add_child(strip)
+
+	var title_lbl      := Label.new()
+	title_lbl.text      = title
+	title_lbl.position  = Vector2(16, 8)
+	title_lbl.size      = Vector2(360, 40)
+	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_color_override("font_color", accent)
+	hdr.add_child(title_lbl)
+
+	var countdown_lbl      := Label.new()
+	countdown_lbl.text      = ""
+	countdown_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	countdown_lbl.position  = Vector2(0, 18)
+	countdown_lbl.size      = Vector2(SCREEN_W - 16, 24)
+	countdown_lbl.add_theme_font_size_override("font_size", 13)
+	countdown_lbl.add_theme_color_override("font_color", C_DIM)
+	hdr.add_child(countdown_lbl)
+
+	return countdown_lbl
+
+## Build one mission card placeholder; returns refs dict so _update can fill it.
+func _make_mission_card(parent: VBoxContainer, is_daily: bool, slot_idx: int) -> Dictionary:
+	var card      := ColorRect.new()
+	card.color     = C_CARD
+	card.custom_minimum_size = Vector2(SCREEN_W, 110)
+	parent.add_child(card)
+
+	# Left accent strip (filled in during update)
+	var strip      := ColorRect.new()
+	strip.color     = C_BORDER
+	strip.position  = Vector2(0, 0)
+	strip.size      = Vector2(5, 110)
+	card.add_child(strip)
+
+	# Separator line at bottom
+	var sep      := ColorRect.new()
+	sep.color     = C_BORDER
+	sep.position  = Vector2(5, 108)
+	sep.size      = Vector2(SCREEN_W - 5, 2)
+	card.add_child(sep)
+
+	# Mission label (2 lines)
+	var desc_lbl      := Label.new()
+	desc_lbl.text      = "…"
+	desc_lbl.position  = Vector2(18, 10)
+	desc_lbl.size      = Vector2(SCREEN_W - 200, 42)
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 15)
+	desc_lbl.add_theme_color_override("font_color", C_TEXT)
+	card.add_child(desc_lbl)
+
+	# Reward label
+	var reward_lbl      := Label.new()
+	reward_lbl.text      = ""
+	reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	reward_lbl.position  = Vector2(SCREEN_W - 210, 10)
+	reward_lbl.size      = Vector2(194, 30)
+	reward_lbl.add_theme_font_size_override("font_size", 14)
+	reward_lbl.add_theme_color_override("font_color", C_GOLD)
+	card.add_child(reward_lbl)
+
+	# Progress bar background
+	var bar_bg      := ColorRect.new()
+	bar_bg.color     = C_BORDER
+	bar_bg.position  = Vector2(18, 57)
+	bar_bg.size      = Vector2(SCREEN_W - 180, 14)
+	card.add_child(bar_bg)
+
+	# Progress bar fill
+	var bar_fill      := ColorRect.new()
+	bar_fill.color     = C_GOLD
+	bar_fill.position  = Vector2(18, 57)
+	bar_fill.size      = Vector2(0, 14)
+	card.add_child(bar_fill)
+
+	# Progress text
+	var prog_lbl      := Label.new()
+	prog_lbl.text      = "0 / 0"
+	prog_lbl.position  = Vector2(18, 73)
+	prog_lbl.size      = Vector2(SCREEN_W - 180, 22)
+	prog_lbl.add_theme_font_size_override("font_size", 12)
+	prog_lbl.add_theme_color_override("font_color", C_DIM)
+	card.add_child(prog_lbl)
+
+	# Claim button
+	var claim_btn      := Button.new()
+	claim_btn.text      = "CLAIM"
+	claim_btn.position  = Vector2(SCREEN_W - 158, 52)
+	claim_btn.size      = Vector2(142, 46)
+	claim_btn.disabled  = true
+	card.add_child(claim_btn)
+	var refs := {
+		"desc_lbl":   desc_lbl,
+		"reward_lbl": reward_lbl,
+		"bar_fill":   bar_fill,
+		"bar_bg":     bar_bg,
+		"prog_lbl":   prog_lbl,
+		"claim_btn":  claim_btn,
+		"strip":      strip,
+		"is_daily":   is_daily,
+		"slot_idx":   slot_idx,
+		"mission_id": "",
+	}
+	claim_btn.pressed.connect(func() -> void: _on_mission_claim(refs))
+	return refs
+
+func _update_missions_panel() -> void:
+	if not _missions_panel:
+		return
+
+	# Rebuild card refs list if missions were regenerated (id changed)
+	var all_missions: Array = GameState.daily_missions + GameState.weekly_missions
+	for i in _mission_card_refs.size():
+		if i >= all_missions.size():
+			break
+		var m: Dictionary = all_missions[i]
+		var refs: Dictionary = _mission_card_refs[i]
+
+		# Update mission_id for claim callback
+		refs["mission_id"] = m["id"]
+
+		# Accent colour by type
+		var accent: Color = C_GOLD
+		match m["type"]:
+			"break_nodes":     accent = C_STONE
+			"craft_items":     accent = C_LUMBER
+			"complete_stages": accent = C_ACCENT
+			"sell_cash":       accent = C_GEM
+			"collect_mat":     accent = _mat_color(m.get("mat", ""))
+		refs["strip"].color = accent
+
+		refs["desc_lbl"].text   = MissionManager.mission_label(m)
+		refs["reward_lbl"].text = MissionManager.reward_label(m)
+
+		var prog: int   = int(m["progress"])
+		var tgt: int    = int(m["target"])
+		var ratio: float = float(prog) / float(maxi(tgt, 1))
+		var bar_w: float = refs["bar_bg"].size.x * ratio
+		refs["bar_fill"].size  = Vector2(bar_w, 14)
+		refs["bar_fill"].color = C_GREEN if ratio >= 1.0 else accent
+		refs["prog_lbl"].text  = "%s / %s" % [_fmt(prog), _fmt(tgt)]
+
+		var done: bool = prog >= tgt
+		refs["claim_btn"].disabled = not done or bool(m.get("claimed", false))
+		refs["claim_btn"].text     = "✓ DONE" if bool(m.get("claimed", false)) else "CLAIM"
+
+	# Countdown labels
+	if _lbl_daily_countdown:
+		_lbl_daily_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.daily_reset_at)
+	if _lbl_weekly_countdown:
+		_lbl_weekly_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.weekly_reset_at)
+
+func _on_mission_claim(refs: Dictionary) -> void:
+	var mid: String = refs["mission_id"]
+	if MissionManager.try_claim(mid):
+		_update_hud()
+		_flash_feedback("Mission complete! Reward claimed.")
+
+func _on_menu_missions() -> void:
+	_close_all_panels()
+	_update_missions_panel()
+	_missions_panel.visible = true
+
+# ══════════════════════════════════════════════════════════════════════════
 # Display refresh
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -3128,8 +3747,8 @@ func _update_display() -> void:
 		_update_build_panel()
 
 func _update_hud() -> void:
-	_lbl_cash.text  = "$ %d"   % GameState.cash
-	_lbl_gems.text  = "◆ %d"   % GameState.gems
+	_lbl_cash.text  = "$ %s"   % _fmt(GameState.cash)
+	_lbl_gems.text  = "◆ %s"   % _fmt(GameState.gems)
 	_lbl_level.text = "Lv. %d" % GameState.player_level
 	_update_xp_bar()
 
@@ -3138,7 +3757,7 @@ func _update_xp_bar() -> void:
 	var pct    := minf(GameState.player_xp / needed, 1.0)
 	_xp_bar_fill.size.x = float(SCREEN_W) * pct
 	if _lbl_xp:
-		_lbl_xp.text = "%d / %d XP" % [int(GameState.player_xp), int(needed)]
+		_lbl_xp.text = "%s / %s XP" % [_fmt(int(GameState.player_xp)), _fmt(int(needed))]
 
 func _update_mine_screen() -> void:
 	var loc_id   := GameState.active_location_id
@@ -3146,7 +3765,7 @@ func _update_mine_screen() -> void:
 	var mat: String = loc_data.get("material", "timber")
 	var accent      := _mat_color(mat)
 
-	# Backdrop texture (only reload when location changes)
+	# Backdrop + full visual rebuild when location changes
 	if loc_id != _last_backdrop_loc:
 		_last_backdrop_loc = loc_id
 		var bg_path: String = BACKDROP_PATHS.get(loc_id, "")
@@ -3154,44 +3773,25 @@ func _update_mine_screen() -> void:
 			_mine_backdrop.texture = load(bg_path)
 		else:
 			_mine_backdrop.texture = null
+		# Reset positions so nodes scatter fresh on the new backdrop
+		for vis: Dictionary in _node_visuals:
+			vis["pos"] = Vector2(-1.0, -1.0)
+		_refresh_mine_visuals(loc_id)
 
 	# Location bar
-	var display_name: String = loc_data.get("display_name", loc_id)
-	_lbl_active_loc.text = display_name
+	_lbl_active_loc.text = loc_data.get("display_name", loc_id)
 	_lbl_active_loc.add_theme_color_override("font_color", accent)
 	_loc_bar_accent.color = accent
 
-	# Node visual
-	var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})
-	var node_id: String = node_state.get("node_id", "")
-	var cur_hp: float   = float(node_state.get("hp", 10.0))
-	var node_data  := BuildDatabase.get_node_data(node_id)
-	var max_hp: float   = float(node_data.get("hp", 10)) if not node_data.is_empty() else 10.0
-	var node_name: String = node_data.get("name", node_id) if not node_data.is_empty() else node_id
+	# Fast path: just update HP bars (shapes don't change per tick)
+	_update_mine_hps(loc_id)
 
-	_node_border.color      = accent.darkened(0.4)
-	_node_rect.color        = accent.darkened(0.78)
-	_node_accent_bar.color  = accent
-	_lbl_node_symbol.text   = mat.left(1).to_upper()
-	_lbl_node_symbol.add_theme_color_override("font_color", accent)
-	_lbl_node_name.text     = node_name
-
-	# HP bar
-	var hp_pct := minf(cur_hp / max_hp, 1.0)
-	_hp_bar_fill.size.x  = 620.0 * hp_pct
-	_hp_bar_fill.color   = C_GREEN if hp_pct > 0.6 else (C_GOLD if hp_pct > 0.3 else C_RED)
-	_lbl_hp_left.text    = "HP"
-	_lbl_hp_right.text   = "%.0f / %.0f" % [cur_hp, max_hp]
-
-	# Material count chip
+	# Info strip
 	var mat_count: int = GameState.materials.get(mat, 0)
-	var mat_name: String = loc_data.get("display_name", "").split(" ")[0]  # "Lumber" from "Lumber Yard"
-	_lbl_mat_count.text = "%s: %d" % [mat.capitalize(), mat_count]
+	_lbl_mat_count.text = "%s: %s" % [mat.capitalize(), _fmt(mat_count)]
 	_lbl_mat_count.add_theme_color_override("font_color", accent)
-
-	# Mine rate info
-	var mp     := GameState.get_mine_power()
-	var wrate  := _worker_damage_rate(loc_id)
+	var mp    := GameState.get_mine_power()
+	var wrate := _worker_damage_rate(loc_id)
 	_lbl_mine_rate.text = "Mine Power: %d  ·  Workers: %.1f HP/s" % [mp, wrate]
 
 func _update_build_panel() -> void:
@@ -3267,7 +3867,7 @@ func _update_build_panel() -> void:
 
 				var row_lbl     := Label.new()
 				var tick        := " ✓" if have >= need else ""
-				row_lbl.text     = "%s: %d / %d%s" % [mat.capitalize(), have, need, tick]
+				row_lbl.text     = "%s: %s / %s%s" % [mat.capitalize(), _fmt(have), _fmt(need), tick]
 				row_lbl.custom_minimum_size = Vector2(SCREEN_W - 40, 36)
 				row_lbl.add_theme_color_override("font_color", C_GREEN if have >= need else accent)
 				_build_reqs_box.add_child(row_lbl)
@@ -3310,13 +3910,31 @@ func _update_build_panel() -> void:
 # Helpers
 # ══════════════════════════════════════════════════════════════════════════
 
+func _fmt(n: int) -> String:
+	if n >= 1_000_000_000:
+		return "%.1fB" % (float(n) / 1_000_000_000.0)
+	elif n >= 1_000_000:
+		return "%.1fM" % (float(n) / 1_000_000.0)
+	elif n >= 10_000:
+		return "%.1fK" % (float(n) / 1_000.0)
+	return "%d" % n
+
 func _mat_color(mat_id: String) -> Color:
 	match mat_id:
-		"timber":   return C_TIMBER
-		"stone":    return C_STONE
-		"lumber":   return C_LUMBER
-		"concrete": return C_CONCRETE
-		_:          return C_TEXT
+		"timber":     return C_TIMBER
+		"stone":      return C_STONE
+		"sand":       return C_SAND
+		"steel_ore":  return C_STEEL_ORE
+		"clay":       return C_CLAY
+		"copper_ore": return C_COPPER_ORE
+		"limestone":  return C_LIMESTONE
+		"bauxite":    return C_BAUXITE
+		"lumber":     return C_LUMBER
+		"concrete":   return C_CONCRETE
+		"glass":      return C_GLASS
+		"steel_beam": return C_STEEL_BEAM
+		"copper_pipe":return C_COPPER_PIPE
+		_:            return C_TEXT
 
 func _tier_colour(tier_id: String) -> Color:
 	match tier_id:
@@ -3376,15 +3994,195 @@ func _flash_build_feedback(msg: String) -> void:
 	tw.tween_interval(0.6)
 	tw.tween_property(_lbl_build_feedback, "modulate:a", 0.0, 0.3)
 
-# ── Offline gains summary ───────────────────────────────────────────────────
+
+# ── Offline gains summary ──────────────────────────────────────────────────
+func _build_offline_popup() -> void:
+	_offline_popup        = CanvasLayer.new()
+	_offline_popup.layer  = 45
+	_offline_popup.visible = false
+	add_child(_offline_popup)
+
+	# Dark dim
+	var dim := ColorRect.new()
+	dim.color    = Color(0.0, 0.0, 0.0, 0.82)
+	dim.position = Vector2.ZERO
+	dim.size     = Vector2(SCREEN_W, SCREEN_H)
+	_offline_popup.add_child(dim)
+
+	# Panel card
+	const CARD_W := 600
+	const CARD_H := 560
+	const CARD_X := (SCREEN_W - CARD_W) / 2
+	const CARD_Y := (SCREEN_H - CARD_H) / 2
+
+	var card_bg := ColorRect.new()
+	card_bg.color    = Color(0.08, 0.09, 0.13, 0.98)
+	card_bg.position = Vector2(CARD_X, CARD_Y)
+	card_bg.size     = Vector2(CARD_W, CARD_H)
+	_offline_popup.add_child(card_bg)
+
+	# Bolt-texture overlay on card
+	var pt := load(PANEL_TEX_PATH) as Texture2D
+	if pt:
+		var np := NinePatchRect.new()
+		np.texture             = pt
+		np.position            = Vector2(CARD_X, CARD_Y)
+		np.size                = Vector2(CARD_W, CARD_H)
+		np.patch_margin_left   = 16
+		np.patch_margin_right  = 16
+		np.patch_margin_top    = 16
+		np.patch_margin_bottom = 16
+		np.modulate            = Color(0.80, 0.85, 0.90, 0.30)
+		_offline_popup.add_child(np)
+
+	# Gold top strip
+	var strip := ColorRect.new()
+	strip.color    = C_GOLD
+	strip.position = Vector2(CARD_X, CARD_Y)
+	strip.size     = Vector2(CARD_W, 4)
+	_offline_popup.add_child(strip)
+
+	# Header
+	var hdr := Label.new()
+	hdr.text                    = "WELCOME BACK"
+	hdr.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
+	hdr.position                = Vector2(CARD_X, CARD_Y + 12)
+	hdr.size                    = Vector2(CARD_W, 50)
+	hdr.add_theme_font_size_override("font_size", 26)
+	hdr.add_theme_color_override("font_color", C_GOLD)
+	_offline_popup.add_child(hdr)
+
+	# Separator under header
+	var sep := ColorRect.new()
+	sep.color    = C_GOLD.darkened(0.4)
+	sep.position = Vector2(CARD_X, CARD_Y + 64)
+	sep.size     = Vector2(CARD_W, 2)
+	_offline_popup.add_child(sep)
+
+	# Time-away label
+	_lbl_offline_time                    = Label.new()
+	_lbl_offline_time.text               = ""
+	_lbl_offline_time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_offline_time.position           = Vector2(CARD_X, CARD_Y + 74)
+	_lbl_offline_time.size               = Vector2(CARD_W, 34)
+	_lbl_offline_time.add_theme_font_size_override("font_size", 15)
+	_lbl_offline_time.add_theme_color_override("font_color", Color(0.65, 0.68, 0.80))
+	_offline_popup.add_child(_lbl_offline_time)
+
+	# "MATERIALS COLLECTED" sub-header
+	var sub := Label.new()
+	sub.text                    = "MATERIALS COLLECTED"
+	sub.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
+	sub.position                = Vector2(CARD_X, CARD_Y + 116)
+	sub.size                    = Vector2(CARD_W, 28)
+	sub.add_theme_font_size_override("font_size", 13)
+	sub.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
+	_offline_popup.add_child(sub)
+
+	# Rows container
+	_offline_rows_box                   = VBoxContainer.new()
+	_offline_rows_box.position          = Vector2(CARD_X + 36, CARD_Y + 150)
+	_offline_rows_box.size              = Vector2(CARD_W - 72, 310)
+	_offline_rows_box.add_theme_constant_override("separation", 8)
+	_offline_popup.add_child(_offline_rows_box)
+
+	# COLLECT button
+	var btn      := Button.new()
+	btn.text      = "COLLECT"
+	btn.flat      = false
+	btn.position  = Vector2(CARD_X + (CARD_W - 240) / 2, CARD_Y + CARD_H - 76)
+	btn.size      = Vector2(240, 54)
+	btn.add_theme_font_size_override("font_size", 18)
+	btn.add_theme_color_override("font_color", Color(0.04, 0.04, 0.06))
+	var bs := StyleBoxFlat.new()
+	bs.bg_color                   = C_GOLD
+	bs.corner_radius_top_left     = 6
+	bs.corner_radius_top_right    = 6
+	bs.corner_radius_bottom_left  = 6
+	bs.corner_radius_bottom_right = 6
+	btn.add_theme_stylebox_override("normal", bs)
+	var bs_h := bs.duplicate() as StyleBoxFlat
+	bs_h.bg_color = C_GOLD.lightened(0.2)
+	btn.add_theme_stylebox_override("hover", bs_h)
+	btn.pressed.connect(_on_offline_collect)
+	_offline_popup.add_child(btn)
+
+
+func _show_offline_popup(summary: Dictionary) -> void:
+	# Clear old rows
+	for ch in _offline_rows_box.get_children():
+		ch.queue_free()
+
+	# Time string
+	var secs  := int(summary.elapsed)
+	var hours := secs / 3600
+	var mins  := (secs % 3600) / 60
+	if hours > 0:
+		_lbl_offline_time.text = "You were away for %dh %dm" % [hours, mins]
+	else:
+		_lbl_offline_time.text = "You were away for %d minutes" % mins
+
+	# Material accent colour map
+	var mat_cols := {
+		"timber":     C_TIMBER,
+		"stone":      C_STONE,
+		"lumber":     C_LUMBER,
+		"concrete":   C_CONCRETE,
+		"sand":       C_SAND,
+		"steel_ore":  C_STEEL_ORE,
+		"glass":      C_GLASS,
+		"steel_beam": C_STEEL_BEAM,
+	}
+
+	for mat: String in summary.gains:
+		var amount := int(summary.gains[mat])
+		var col: Color = mat_cols.get(mat, C_GOLD)
+
+		var row := HBoxContainer.new()
+		row.custom_minimum_size = Vector2(0, 42)
+
+		# Colour swatch
+		var swatch := ColorRect.new()
+		swatch.color               = col
+		swatch.custom_minimum_size = Vector2(6, 36)
+		row.add_child(swatch)
+
+		# Gap
+		var gap := Control.new()
+		gap.custom_minimum_size = Vector2(12, 0)
+		row.add_child(gap)
+
+		# Material name
+		var name_lbl := Label.new()
+		name_lbl.text                  = mat.replace("_", " ").capitalize()
+		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_lbl.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+		name_lbl.add_theme_font_size_override("font_size", 16)
+		name_lbl.add_theme_color_override("font_color", Color.WHITE)
+		row.add_child(name_lbl)
+
+		# Amount
+		var amt_lbl := Label.new()
+		amt_lbl.text                 = "+%d" % amount
+		amt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		amt_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		amt_lbl.add_theme_font_size_override("font_size", 16)
+		amt_lbl.add_theme_color_override("font_color", col)
+		row.add_child(amt_lbl)
+
+		_offline_rows_box.add_child(row)
+
+	_offline_popup.visible = true
+
+
+func _on_offline_collect() -> void:
+	_offline_popup.visible = false
+	OfflineProgressCalculator.clear_offline_summary()
+	_update_display()
+
+
 func _check_offline_summary() -> void:
 	var summary := OfflineProgressCalculator.get_offline_summary()
 	if summary.gains.is_empty():
 		return
-	var mins  := int(summary.elapsed / 60.0)
-	var parts := PackedStringArray()
-	for mat: String in summary.gains:
-		parts.append("+%d %s" % [int(summary.gains[mat]), mat.capitalize()])
-	_flash_feedback("Welcome back!\n%s\n(%d min offline)" % [", ".join(parts), mins])
-	OfflineProgressCalculator.clear_offline_summary()
-	_update_display()
+	_show_offline_popup(summary)

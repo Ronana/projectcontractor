@@ -96,10 +96,10 @@ func get_default_location_nodes() -> Dictionary:
 	for loc_id: String in LOCATION_ORDER:
 		var first_node := get_active_node(loc_id, 1)
 		if not first_node.is_empty():
-			result[loc_id] = {
+			result[loc_id] = [{
 				"node_id": first_node.get("id", ""),
 				"hp":      float(first_node.get("hp", 10))
-			}
+			}]
 	return result
 
 ## Returns the full list of crew members available to hire.
@@ -385,19 +385,20 @@ func _register_locations() -> void:
 
 func _register_crew() -> void:
 	_crew_templates = [
-		_crew("old_bob",      "Old Bob",      "timber",     "lumber_yard",      40,  0.5),
-		_crew("granite_pete", "Granite Pete", "stone",      "stone_quarry",     75,  1.0),
-		_crew("nimble_nick",  "Nimble Nick",  "timber",     "lumber_yard",      90,  1.0),
-		_crew("sandy_walsh",  "Sandy Walsh",  "sand",       "sand_pit",         70,  0.8),
-		_crew("iron_mike",    "Iron Mike",    "steel_ore",  "steel_yard",       110, 1.0),
-		_crew("clay_molly",   "Clay Molly",   "clay",       "clay_pit",         90,  0.8),
-		_crew("copper_carl",  "Copper Carl",  "copper_ore", "copper_mine",      120, 0.9),
-		_crew("lime_larry",   "Lime Larry",   "limestone",  "limestone_quarry", 140, 1.0),
-		_crew("boxy_dave",    "Boxy Dave",    "bauxite",    "bauxite_mine",     160, 1.1),
+		_crew("old_bob",      "Old Bob",      "timber",     "lumber_yard",       40,  0.5),
+		_crew("granite_pete", "Granite Pete", "stone",      "stone_quarry",      75,  1.0),
+		_crew("nimble_nick",  "Nimble Nick",  "timber",     "lumber_yard",       90,  1.0),
+		_crew("sandy_walsh",  "Sandy Walsh",  "sand",       "sand_pit",          70,  0.8),
+		_crew("iron_mike",    "Iron Mike",    "steel_ore",  "steel_yard",        110, 1.0),
+		_crew("clay_molly",   "Clay Molly",   "clay",       "clay_pit",          90,  0.8),
+		_crew("copper_carl",  "Copper Carl",  "copper_ore", "copper_mine",       120, 0.9),
+		_crew("lime_larry",   "Lime Larry",   "limestone",  "limestone_quarry",  140, 1.0),
+		_crew("boxy_dave",    "Boxy Dave",    "bauxite",    "bauxite_mine",      160, 1.1),
 	]
 
-func _crew(id: String, crew_name: String, mat: String, loc: String, cost: int, bonus: float) -> CrewMemberResource:
-	var c := CrewMemberResource.new()
+func _crew(id: String, crew_name: String, mat: String, loc: String,
+		cost: int, bonus: float) -> CrewMemberResource:
+	var c               := CrewMemberResource.new()
 	c.id               = id
 	c.display_name     = crew_name
 	c.material_type    = mat
@@ -410,9 +411,9 @@ func _crew(id: String, crew_name: String, mat: String, loc: String, cost: int, b
 # ── Factory helpers ─────────────────────────────────────────────────────────
 
 func _stage(id: String, stage_name: String, mats: Dictionary, order: int) -> BuildStageResource:
-	var s := BuildStageResource.new()
-	s.id = id
-	s.display_name = stage_name
-	s.required_materials = mats
-	s.stage_order = order
+	var s                    := BuildStageResource.new()
+	s.id                      = id
+	s.display_name            = stage_name
+	s.required_materials      = mats
+	s.stage_order             = order
 	return s

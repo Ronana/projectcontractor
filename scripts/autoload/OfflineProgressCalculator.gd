@@ -74,9 +74,9 @@ func _get_idle_rates() -> Dictionary:
 			continue
 		var mat: String = loc_data.get("material", "timber")
 
-		# Use the node currently active at this location
-		var node_state: Dictionary = GameState.location_nodes.get(loc_id, {})
-		var node_id: String        = node_state.get("node_id", "")
+		# Use the first active node at this location (array format)
+		var node_arr: Array = GameState.location_nodes.get(loc_id, [])
+		var node_id: String = node_arr[0].get("node_id", "") if not node_arr.is_empty() else ""
 		var node_data := BuildDatabase.get_node_data(node_id)
 		if node_data.is_empty():
 			node_data = BuildDatabase.get_active_node(loc_id, GameState.player_level)
