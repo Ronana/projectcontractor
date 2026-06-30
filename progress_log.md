@@ -2,6 +2,94 @@
 
 ---
 
+## 2026-07-01 — Big batch: wave-clear unlocks, hold-to-mine, Blasting Cap, chest system, 18 intro tasks, build cooldown fix, menu restructure
+
+### Completed this session
+
+**BuildDatabase.gd**
+- `LOCATION_UNLOCK_NODES` thresholds updated to wave-clear counts: `[30, 78, 126, 174, 222, 270, 318]`
+- Comment updated: "A 'clear' = all nodes on screen destroyed in one wave"
+
+**UpgradeDatabase.gd**
+- Upgrade name `"Sharper Tools"` → `"Upgrade Tools"` (id `sharper_tools` unchanged)
+
+**GameState.gd**
+- Added tutorial counters (permanent): `timber_collected`, `sand_collected`, `lumber_crafted`, `materials_sold`, `visited_stone_quarry`, `visited_sand_pit`, `blasting_caps_fired`, `blasting_cap_cooldown_until`, `toolbox_items_used`, `delivery_pallets_opened`, `vintage_chests_opened`
+- Added chest system: `pending_chests: Dictionary`, `chest_modifiers: Array`, `get_chest_modifier_bonus(effect)`
+- Wired `get_chest_modifier_bonus()` into: `get_mine_power`, `get_drop_bonus`, `get_xp_mult`, `get_stage_cash_mult`, `get_worker_rate_mult`, `get_build_power`
+
+**SaveManager.gd**
+- All new fields saved/loaded/init-fresh'd
+
+**ChestDatabase.gd** (new autoload, registered in project.godot)
+- 13 modifiers across common/uncommon/rare rarities (mine power, XP, drop bonus, cash, worker rate, build power)
+- `RARITY_WEIGHTS: {common:60, uncommon:30, rare:10}`
+- `roll_modifier()` — weighted random selection; `rarity_color(rarity)` helper
+
+**project.godot**
+- `ChestDatabase` registered as autoload
+
+**Main.gd (major changes)**
+- `_break_node()`: removed per-node `location_unlock_progress` increment; added `timber_collected`/`sand_collected` tracking; wave-clear increment moved inside `if all_clear` block; `_update_chest_btn()` called after every break
+- `_spawn_wave()`: added chest spawn logic (12% chance per wave clear, 25% vintage chest / 75% delivery pallet); updates chest button if active location
+- `INTRO_TASKS` replaced: 10 old tasks → 18 new tasks (timer-based _congrats screen at end)
+- `_intro_task_value()` rewritten for all new keys
+- `_update_intro_strip()`: special handling for `_congrats` key — 4-second auto-hide via `create_timer`
+- `_on_location_btn()`: tracks `visited_stone_quarry` / `visited_sand_pit`
+- `_on_sell_pressed()`: increments `materials_sold`
+- `_on_craft_one/all()`: increments `lumber_crafted`
+- `_on_use_item()`: increments `toolbox_items_used`
+- `_complete_stage()`: build cooldown removed from here
+- `_complete_building()`: `stage_cooldown_until` set for full building completion only
+- Hold-to-mine: `MINE_HOLD_INTERVAL=0.35s`, `_mine_hold_active`, `_mine_hold_timer`; `_on_mine_hold_start/stop()` wired to `button_down`/`button_up`; `_close_all_panels()` resets `_mine_hold_active`
+- Blasting Cap: `BLAST_COOLDOWN=30.0`, `_btn_blast_cap`, `_lbl_blast_cooldown`, `_blast_flash`; `_on_blast_cap_fire()`, `_update_blast_cap_btn()` piggybacking on boost-strip 1s timer tick
+- Chest system: `CHEST_SPAWN_CHANCE=0.12`, `_btn_chest`, `_chest_popup`; `_update_chest_btn()`, `_on_chest_open()`, `_open_delivery_pallet()`, `_open_vintage_chest()`, `_show_chest_popup()`; `_update_chest_btn()` also called from `_update_mine_screen()` so chest visibility is correct on location switch
+- Menu restructure: removed MINE/TOOLBOX/TRADESHOW/SHOP; added SKILL TREE (locked < 4 buildings); MISSIONS locked < 10 buildings; BLUEPRINTS locked < 15 buildings; `_rebuild_menu_items()` called on each open so lock states are always current; locked items show 🔒 label + disabled button
+- `_on_menu_skill_tree()`: opens UPGRADES panel on SKILLS tab
+
+### Currently in progress / left mid-task
+All changes implemented. Needs Godot reload + test.
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Mine screen: tap-hold a node — damage should tick continuously at tool speed rate
+3. Blasting Cap button (bottom-right of mine area): fire it — all nodes take 1× mine power damage, 30s cooldown shows countdown
+4. Complete 30 wave clears at Lumber Yard — Stone Quarry should unlock
+5. Open menu — MINE / TOOLBOX / TRADE SHOW / SHOP should be gone; SKILL TREE visible (locked if < 4 buildings); MISSIONS / BLUEPRINTS show lock text until threshold met
+6. Receive a delivery pallet or vintage chest — chest button appears centred on mine screen; open it to see popup
+7. Vintage chest: verify permanent stat modifier added to `chest_modifiers` and affects gameplay stat
+8. Tutorial strip: complete all 18 tasks, confirm congrats screen appears and auto-hides after 4s
+9. Commit once verified
+
+---
+
+## 2026-06-30 — Location Unlock System
+
+### Completed this session
+- **BuildDatabase.gd**: Added `LOCATION_UNLOCK_NODES` const array (thresholds: 50/80/100/120/150/200/250)
+- **GameState.gd**: Added `location_unlock_progress: Dictionary`
+- **SaveManager.gd**: Save/load + `_init_fresh_state` + `prestige_reset` all wired (resets on prestige)
+- **Main.gd**:
+  - `_break_node()`: increments `location_unlock_progress[loc_id]` on every break
+  - `_is_location_unlocked(loc_id)`: checks prev location's progress vs threshold
+  - Loc picker: locked rows show dim overlay, greyed name, "Break X nodes at Y" requirement, progress bar + count
+  - Loc picker: rebuilds on every open (`_rebuild_loc_picker_rows`) so progress stays current
+  - Crew loc picker: filters to unlocked-only, rebuilds on open (`_rebuild_crew_loc_rows`)
+  - `_on_location_btn`: guards against selecting locked locations
+
+### Currently in progress / left mid-task
+All code done. Needs Godot reload + test.
+
+### Next step
+1. Reload project → 0 parser errors
+2. Fresh save → only Lumber Yard available, Stone Quarry shows progress bar at 0/50
+3. Break 50 trees → Stone Quarry unlocks (open picker to verify)
+4. Crew MOVE button → only Lumber Yard listed until Stone Quarry unlocks
+5. Prestige → location_unlock_progress resets, back to Lumber Yard only
+6. Commit once verified
+
+---
+
 ## 2026-06-26 — Phase 0 Complete
 
 ### Completed this session

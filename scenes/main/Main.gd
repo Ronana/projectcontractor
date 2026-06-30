@@ -21,6 +21,31 @@ const LOC_BAR_H    := 76
 const MINE_Y       := HUD_H + LOC_BAR_H   # 186
 const MINE_H       := SCREEN_H - MINE_Y - BOTTOM_BAR_H  # 994
 
+## Ordered list of intro tasks shown to new players (18 total).
+## Each entry: { text, key, target }
+## key maps to _intro_task_value() which reads live GameState.
+## Special keys: "_congrats" = final thank-you display (never auto-advances).
+const INTRO_TASKS: Array = [
+	{"text": "Collect 15 Timber",                                        "key": "timber_collected",       "target": 15},
+	{"text": "Craft 5 Lumber  (Unlocks Craft)",                          "key": "lumber_crafted",         "target": 5},
+	{"text": "Upgrade Tools  (Unlocks Upgrades)",                        "key": "sharper_tools_level",    "target": 1},
+	{"text": "Fire 5 Blasting Caps",                                     "key": "blasting_caps_fired",    "target": 5},
+	{"text": "Go to Stone Quarry",                                       "key": "visited_stone_quarry",   "target": 1},
+	{"text": "Upgrade Tools to Level 3",                                 "key": "sharper_tools_level",    "target": 3},
+	{"text": "Open a Delivery Pallet  (Unlocks Delivery Pallets)",       "key": "delivery_pallets_opened","target": 1},
+	{"text": "Use 3 Toolbox Items",                                      "key": "toolbox_items_used",     "target": 3},
+	{"text": "Open a Vintage Tool Chest  (Unlocks Vintage Tool Chests)", "key": "vintage_chests_opened",  "target": 1},
+	{"text": "Go to Sand Pit",                                           "key": "visited_sand_pit",       "target": 1},
+	{"text": "Collect 25 Sand",                                          "key": "sand_collected",         "target": 25},
+	{"text": "Upgrade Tools to Level 5",                                 "key": "sharper_tools_level",    "target": 5},
+	{"text": "Build a Structure  (Unlocks Build Menu)",                  "key": "buildings_built",        "target": 1},
+	{"text": "Sell Materials  (Unlocks Sell)",                           "key": "materials_sold",         "target": 1},
+	{"text": "Hire a Worker  (Unlocks Crew)",                            "key": "crew",                   "target": 1},
+	{"text": "Reach Player Level 20",                                    "key": "player_level",           "target": 20},
+	{"text": "Sign a New Contract",                                      "key": "contract_count",         "target": 1},
+	{"text": "Thank you for playing the tutorial — enjoy the game!",     "key": "_congrats",              "target": 1},
+]
+
 const _HOUSE_SHEET_PATH := "res://assets/imported/ModernHouseA.png"
 const _CELL_W           := 281
 const _CELL_H           := 384
@@ -132,8 +157,19 @@ var _xp_bar_fill:    ColorRect
 
 # ── Mine screen refs ───────────────────────────────────────────────────────
 var _lbl_active_loc:   Label            # active location name in the bar
+var _intro_strip:         CanvasLayer    # intro task banner
+var _lbl_intro_count:     Label          # "Intro Tasks (3/10)"
+var _lbl_intro_task:      Label          # current task text
+var _intro_bar_fill:      ColorRect      # progress bar fill
+var _lbl_intro_prog:      Label          # "3 / 5"
+var _consent_panel:       CanvasLayer    # first-launch privacy agreement
+var _next_unlock_widget:  Control       # left-side next-location badge
+var _lbl_nu_progress:     Label         # "71 / 50" inside badge
+var _nu_prog_bg:          ColorRect     # coloured box behind progress number
+var _lbl_nu_name:         Label         # "→ Stone Quarry"
 var _loc_bar_accent:   ColorRect        # coloured underline strip
 var _loc_picker_panel: CanvasLayer      # vertical location picker overlay
+var _loc_picker_vbox:  VBoxContainer    # rebuilt on open to reflect new unlocks
 const MAX_NODES := 5                # visual pool; active count driven by GameState.active_node_count
 var _node_visuals: Array = []       # Array[Dictionary] – one slot per possible node
 var _lbl_mat_count:    Label
@@ -161,9 +197,23 @@ var _lbl_build_bp:          Label
 var _lbl_build_feedback:    Label
 var _property_income_accum: float = 0.0  # fractional cash accumulated this tick
 var _build_panel_timer:     float = 0.0  # seconds counter for cooldown label refresh
+# ── Hold-to-mine state ────────────────────────────────────────────────────
+const MINE_HOLD_INTERVAL: float = 0.35  # seconds between auto-hits while holding
+var _mine_hold_active:  bool  = false
+var _mine_hold_timer:   float = 0.0
+# ── Blasting Cap ──────────────────────────────────────────────────────────
+const BLAST_COOLDOWN:     float = 30.0
+var _btn_blast_cap:       Button
+var _lbl_blast_cooldown:  Label
+var _blast_flash:         ColorRect  # full-mine flash overlay
+# ── Chest system ──────────────────────────────────────────────────────────
+const CHEST_SPAWN_CHANCE: float = 0.12  # 12% per wave clear
+var _btn_chest:           Button        # visible when a chest is pending in active loc
+var _chest_popup:         CanvasLayer   # reward popup shown after opening
 
 # ── Menu overlay refs ──────────────────────────────────────────────────────
-var _menu_overlay: CanvasLayer
+var _menu_overlay:      CanvasLayer
+var _menu_items_root:   Control       # cleared + rebuilt each time menu opens
 
 # ── Quick bar (bottom bar) refs ────────────────────────────────────────────
 var _bottom_bar_cl:    CanvasLayer
@@ -185,6 +235,7 @@ var _crew_loc_labels:      Array[Label]  = []   # current location per card
 var _crew_move_btns:       Array[Button] = []   # "▶ MOVE" per card
 var _crew_loc_picker:      CanvasLayer           # location-reassign overlay
 var _crew_loc_picker_for:  String = ""           # crew id being reassigned
+var _crew_loc_rows_node:   Control                 # dynamic rows container, rebuilt on open
 
 # ── Craft panel refs ───────────────────────────────────────────────────────
 var _craft_panel:      CanvasLayer
@@ -262,6 +313,10 @@ var _boost_strip:           CanvasLayer   # thin strip showing active boost time
 var _boost_chip_box:        HBoxContainer
 var _boost_strip_timer:     float = 0.0
 
+# ── Stats panel refs ─────────────────────────────────────────────────────────
+var _stats_panel: CanvasLayer
+var _stats_rows:  Array = []   # Array of [label_node, value_node]
+
 # ── Trade Show panel refs ────────────────────────────────────────────────────
 var _tradeshow_panel:       CanvasLayer
 var _lbl_ts_event_name:     Label
@@ -310,6 +365,7 @@ func _ready() -> void:
 	_build_blueprints_panel()
 	_build_missions_panel()
 	_build_tradeshow_panel()
+	_build_stats_panel()
 	MissionManager.missions_changed.connect(_update_missions_panel)
 	_build_toolbox_panel()
 	_build_toolbox_float_btn()
@@ -317,6 +373,8 @@ func _ready() -> void:
 	_update_display()
 	_check_offline_summary()
 	_apply_global_font()
+	_build_intro_strip()
+	_build_consent_panel()
 
 func _apply_global_font() -> void:
 	var bold := load("res://assets/fonts/Rajdhani-Bold.ttf")     as FontFile
@@ -335,11 +393,20 @@ func _process(delta: float) -> void:
 	_tick_workers(delta)
 	_tick_property_income(delta)
 
-	# Refresh active boost strip every second
+	# Hold-to-mine: continuously apply damage while finger is held down
+	if _mine_hold_active:
+		_mine_hold_timer += delta
+		if _mine_hold_timer >= MINE_HOLD_INTERVAL:
+			_mine_hold_timer -= MINE_HOLD_INTERVAL
+			var mp := GameState.get_mine_power()
+			_apply_node_damage(GameState.active_location_id, float(mp))
+
+	# Refresh active boost strip and blast cap cooldown every second
 	_boost_strip_timer += delta
 	if _boost_strip_timer >= 1.0:
 		_boost_strip_timer = 0.0
 		_update_boost_strip()
+		_update_blast_cap_btn()
 
 	# Refresh mission countdown labels every second while panel is open
 	if _missions_panel and _missions_panel.visible:
@@ -405,6 +472,308 @@ func _build_splash() -> void:
 	timer.timeout.connect(cl.queue_free)
 	cl.add_child(timer)
 
+# ── Intro Task Strip ───────────────────────────────────────────────────────
+func _build_intro_strip() -> void:
+	_intro_strip = CanvasLayer.new()
+	_intro_strip.layer   = 15
+	_intro_strip.visible = GameState.intro_strip_visible and \
+		GameState.intro_task_index < INTRO_TASKS.size()
+	add_child(_intro_strip)
+
+	# Occupies the former location bar slot: y=HUD_H, height=LOC_BAR_H
+	const SY := HUD_H      # 110
+	const SH := LOC_BAR_H  # 76
+
+	# Background
+	var bg := ColorRect.new()
+	bg.color    = Color(0.05, 0.07, 0.11, 0.96)
+	bg.position = Vector2(0, SY)
+	bg.size     = Vector2(720, SH)
+	_intro_strip.add_child(bg)
+
+	# Top accent line
+	var top_line := ColorRect.new()
+	top_line.color    = Color(1.0, 0.78, 0.2, 0.5)
+	top_line.position = Vector2(0, SY)
+	top_line.size     = Vector2(720, 2)
+	_intro_strip.add_child(top_line)
+
+	# Bottom accent line
+	var bot_line := ColorRect.new()
+	bot_line.color    = Color(1.0, 0.78, 0.2, 0.25)
+	bot_line.position = Vector2(0, SY + SH - 2)
+	bot_line.size     = Vector2(720, 2)
+	_intro_strip.add_child(bot_line)
+
+	# "Intro Tasks (x/10)" counter — top-left
+	_lbl_intro_count = Label.new()
+	_lbl_intro_count.position           = Vector2(12, SY + 6)
+	_lbl_intro_count.size               = Vector2(300, 18)
+	_lbl_intro_count.add_theme_font_size_override("font_size", 13)
+	_lbl_intro_count.add_theme_color_override("font_color", Color(1.0, 0.78, 0.2))
+	_intro_strip.add_child(_lbl_intro_count)
+
+	# No dismiss button — intro tasks are mandatory
+
+	# Task text — large, centred vertically in remaining space
+	_lbl_intro_task = Label.new()
+	_lbl_intro_task.position           = Vector2(12, SY + 26)
+	_lbl_intro_task.size               = Vector2(620, 26)
+	_lbl_intro_task.add_theme_font_size_override("font_size", 18)
+	_lbl_intro_task.add_theme_color_override("font_color", Color.WHITE)
+	_intro_strip.add_child(_lbl_intro_task)
+
+	# Progress bar background
+	var bar_bg := ColorRect.new()
+	bar_bg.color    = Color(1, 1, 1, 0.08)
+	bar_bg.position = Vector2(12, SY + 55)
+	bar_bg.size     = Vector2(620, 12)
+	_intro_strip.add_child(bar_bg)
+
+	# Progress bar fill
+	_intro_bar_fill = ColorRect.new()
+	_intro_bar_fill.color    = Color(1.0, 0.78, 0.2)
+	_intro_bar_fill.position = Vector2(12, SY + 55)
+	_intro_bar_fill.size     = Vector2(0, 12)
+	_intro_strip.add_child(_intro_bar_fill)
+
+	# Progress label "x / y" — right of bar
+	_lbl_intro_prog = Label.new()
+	_lbl_intro_prog.position             = Vector2(638, SY + 53)
+	_lbl_intro_prog.size                 = Vector2(76, 18)
+	_lbl_intro_prog.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_lbl_intro_prog.add_theme_font_size_override("font_size", 13)
+	_lbl_intro_prog.add_theme_color_override("font_color", Color(0.65, 0.65, 0.70))
+	_intro_strip.add_child(_lbl_intro_prog)
+
+	_update_intro_strip()
+
+func _intro_task_value(key: String) -> int:
+	match key:
+		"timber_collected":    return GameState.timber_collected
+		"sand_collected":      return GameState.sand_collected
+		"lumber_crafted":      return GameState.lumber_crafted
+		"materials_sold":      return GameState.materials_sold
+		"visited_stone_quarry":return GameState.visited_stone_quarry
+		"visited_sand_pit":    return GameState.visited_sand_pit
+		"blasting_caps_fired": return GameState.blasting_caps_fired
+		"toolbox_items_used":  return GameState.toolbox_items_used
+		"delivery_pallets_opened": return GameState.delivery_pallets_opened
+		"vintage_chests_opened":   return GameState.vintage_chests_opened
+		"sharper_tools_level": return int(GameState.upgrades.get("sharper_tools", 0))
+		"buildings_built":     return GameState.skyline.size() + GameState.portfolio.size()
+		"crew":                return GameState.crew.size()
+		"player_level":        return GameState.player_level
+		"contract_count":      return GameState.contract_count
+		"_congrats":           return 0  # never auto-advances; manually hidden after display
+	return 0
+
+func _update_intro_strip() -> void:
+	var idx := GameState.intro_task_index
+	if idx >= INTRO_TASKS.size() or not GameState.intro_strip_visible:
+		_intro_strip.visible = false
+		return
+	_intro_strip.visible = true
+
+	var task: Dictionary = INTRO_TASKS[idx]
+	var is_congrats: bool = task["key"] == "_congrats"
+
+	if is_congrats:
+		# Final congratulations display — show for 4 seconds then permanently hide
+		_lbl_intro_count.text = "Tutorial Complete! 🎉"
+		_lbl_intro_task.text  = task["text"]
+		_lbl_intro_prog.text  = ""
+		_intro_bar_fill.size  = Vector2(620.0, 12)
+		# Auto-hide after 4 seconds if not already scheduled
+		if not get_tree().has_group("_intro_hide_timer"):
+			var t := get_tree().create_timer(4.0)
+			t.timeout.connect(func():
+				GameState.intro_task_index    = INTRO_TASKS.size()
+				GameState.intro_strip_visible = false
+				_intro_strip.visible          = false
+			)
+		return
+
+	var cur: int  = _intro_task_value(task["key"])
+	var tgt: int  = task["target"]
+	var pct: float = clampf(float(cur) / float(tgt), 0.0, 1.0)
+
+	_lbl_intro_count.text = "Tutorial  (%d / %d)" % [idx, INTRO_TASKS.size() - 1]
+	_lbl_intro_task.text  = task["text"]
+	_lbl_intro_prog.text  = "%d / %d" % [mini(cur, tgt), tgt]
+	_intro_bar_fill.size  = Vector2(620.0 * pct, 12)
+
+func _check_intro_tasks() -> void:
+	var idx := GameState.intro_task_index
+	if idx >= INTRO_TASKS.size():
+		return
+	# Advance through any tasks that are now satisfied
+	while idx < INTRO_TASKS.size():
+		var task: Dictionary = INTRO_TASKS[idx]
+		if _intro_task_value(task["key"]) >= int(task["target"]):
+			idx += 1
+			GameState.intro_task_index = idx
+		else:
+			break
+	_update_intro_strip()
+
+# ── Consent / Privacy panel (first launch only) ────────────────────────────
+func _build_consent_panel() -> void:
+	if GameState.privacy_agreed:
+		return  # already agreed — never show again
+
+	const PRIVACY_POLICY_URL := "https://projectcontractor.game/privacy"  # update before release
+	const PAD   := 32
+	const PW    := 680
+	const PX    := (SCREEN_W - PW) / 2  # 20px each side
+
+	_consent_panel = CanvasLayer.new()
+	_consent_panel.layer = 60
+	add_child(_consent_panel)
+
+	# Solid full-screen block (no game peeking through)
+	var dim := ColorRect.new()
+	dim.color = Color(0.04, 0.05, 0.08, 1.0)
+	dim.size  = Vector2(SCREEN_W, SCREEN_H)
+	_consent_panel.add_child(dim)
+
+	# Subtle background pattern lines
+	for i in 8:
+		var line := ColorRect.new()
+		line.color    = Color(1, 1, 1, 0.02)
+		line.position = Vector2(0, i * 160.0)
+		line.size     = Vector2(SCREEN_W, 80)
+		_consent_panel.add_child(line)
+
+	# Card — vertically centred, generous padding
+	var card_y  := 120
+	var card_h  := SCREEN_H - 240
+
+	var card := ColorRect.new()
+	card.color    = Color(0.11, 0.13, 0.18)
+	card.position = Vector2(PX, card_y)
+	card.size     = Vector2(PW, card_h)
+	_consent_panel.add_child(card)
+
+	# Blue top accent bar
+	var top_bar := ColorRect.new()
+	top_bar.color    = Color(0.22, 0.52, 1.0)
+	top_bar.position = Vector2(PX, card_y)
+	top_bar.size     = Vector2(PW, 6)
+	_consent_panel.add_child(top_bar)
+
+	# Title
+	var title := Label.new()
+	title.text                   = "Data & Privacy"
+	title.position               = Vector2(PX, card_y + 16)
+	title.size                   = Vector2(PW, 52)
+	title.horizontal_alignment   = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment     = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 30)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	_consent_panel.add_child(title)
+
+	# Subtitle
+	var sub := Label.new()
+	sub.text                 = "Please read before playing"
+	sub.position             = Vector2(PX, card_y + 68)
+	sub.size                 = Vector2(PW, 28)
+	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sub.add_theme_font_size_override("font_size", 15)
+	sub.add_theme_color_override("font_color", Color(0.5, 0.6, 0.75))
+	_consent_panel.add_child(sub)
+
+	# Divider
+	var div := ColorRect.new()
+	div.color    = Color(1, 1, 1, 0.07)
+	div.position = Vector2(PX + PAD, card_y + 102)
+	div.size     = Vector2(PW - PAD * 2, 1)
+	_consent_panel.add_child(div)
+
+	# Body — RichTextLabel for reliable wrapping
+	var body_w    := PW - PAD * 2
+	var body_x    := PX + PAD
+	var body_y    := card_y + 114
+	var body_h    := 380
+
+	var body_bg := ColorRect.new()
+	body_bg.color    = Color(0.06, 0.07, 0.11)
+	body_bg.position = Vector2(body_x, body_y)
+	body_bg.size     = Vector2(body_w, body_h)
+	_consent_panel.add_child(body_bg)
+
+	var body                      := RichTextLabel.new()
+	body.bbcode_enabled            = true
+	body.scroll_active             = false
+	body.fit_content               = false
+	body.position                  = Vector2(body_x + 14, body_y + 14)
+	body.size                      = Vector2(body_w - 28, body_h - 28)
+	body.add_theme_font_size_override("normal_font_size", 16)
+	body.add_theme_color_override("default_color", Color(0.80, 0.83, 0.88))
+	body.text = (
+		"[b]Project Contractor[/b] uses third-party analytics to improve the game.\n\n"
+		+ "[color=#8aaecc]We may collect:[/color]\n"
+		+ "  • An anonymous device identifier\n"
+		+ "  • In-game behaviour and session data\n"
+		+ "  • Crash and performance reports\n\n"
+		+ "[color=#8aaecc]We never collect or sell:[/color]\n"
+		+ "  • Your name, email, or location\n"
+		+ "  • Any personally identifiable information\n\n"
+		+ "By tapping [b]I Agree[/b] below, you accept our Privacy Policy and consent to the above."
+	)
+	_consent_panel.add_child(body)
+
+	# Privacy Policy link button
+	var pp_btn      := Button.new()
+	pp_btn.text      = "Read Privacy Policy  ↗"
+	pp_btn.flat      = true
+	pp_btn.position  = Vector2(PX + PW / 2 - 160, card_y + 510)
+	pp_btn.size      = Vector2(320, 44)
+	pp_btn.add_theme_font_size_override("font_size", 16)
+	pp_btn.add_theme_color_override("font_color", Color(0.4, 0.7, 1.0))
+	pp_btn.pressed.connect(func(): OS.shell_open(PRIVACY_POLICY_URL))
+	_consent_panel.add_child(pp_btn)
+
+	# Agree button
+	var agree_y    := card_y + 566
+	var agree_bg   := ColorRect.new()
+	agree_bg.color    = Color(0.10, 0.52, 0.20)
+	agree_bg.position = Vector2(PX + PAD, agree_y)
+	agree_bg.size     = Vector2(PW - PAD * 2, 72)
+	_consent_panel.add_child(agree_bg)
+
+	# Highlight strip on agree button
+	var agree_shine := ColorRect.new()
+	agree_shine.color    = Color(1, 1, 1, 0.06)
+	agree_shine.position = Vector2(PX + PAD, agree_y)
+	agree_shine.size     = Vector2(PW - PAD * 2, 36)
+	_consent_panel.add_child(agree_shine)
+
+	var agree_btn      := Button.new()
+	agree_btn.text      = "✓  I Agree — Let's Play!"
+	agree_btn.flat      = true
+	agree_btn.position  = Vector2(PX + PAD, agree_y)
+	agree_btn.size      = Vector2(PW - PAD * 2, 72)
+	agree_btn.add_theme_font_size_override("font_size", 22)
+	agree_btn.add_theme_color_override("font_color", Color.WHITE)
+	agree_btn.pressed.connect(_on_consent_agreed)
+	_consent_panel.add_child(agree_btn)
+
+	# Fine print
+	var fine := Label.new()
+	fine.text                 = "You must agree to continue. This game is free to play."
+	fine.position             = Vector2(PX, agree_y + 82)
+	fine.size                 = Vector2(PW, 24)
+	fine.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	fine.add_theme_font_size_override("font_size", 13)
+	fine.add_theme_color_override("font_color", Color(0.38, 0.40, 0.45))
+	_consent_panel.add_child(fine)
+
+func _on_consent_agreed() -> void:
+	GameState.privacy_agreed = true
+	SaveManager.save_game()
+	_consent_panel.visible = false
+
 # ── HUD ────────────────────────────────────────────────────────────────────
 func _build_hud() -> void:
 	var cl  := CanvasLayer.new()
@@ -469,7 +838,7 @@ func _build_hud() -> void:
 	_lbl_xp.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_lbl_xp.position = Vector2(0, HUD_H - 22)
 	_lbl_xp.size     = Vector2(SCREEN_W, 20)
-	_lbl_xp.add_theme_font_size_override("font_size", 11)
+	_lbl_xp.add_theme_font_size_override("font_size", 14)
 	_lbl_xp.add_theme_color_override("font_color", Color(1, 1, 1, 0.7))
 	cl.add_child(_lbl_xp)
 
@@ -553,7 +922,7 @@ func _build_panel_header(parent: Node, title_text: String, accent: Color) -> But
 	title.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	title.position  = Vector2(60, 4)
 	title.size      = Vector2(SCREEN_W - 120, 72)
-	title.add_theme_font_size_override("font_size", 22)
+	title.add_theme_font_size_override("font_size", 28)
 	title.add_theme_color_override("font_color", Color.WHITE)
 	parent.add_child(title)
 
@@ -563,7 +932,7 @@ func _build_panel_header(parent: Node, title_text: String, accent: Color) -> But
 	close_btn.text     = "✕"
 	close_btn.position = Vector2(SCREEN_W - 68, 12)
 	close_btn.size     = Vector2(52, 52)
-	close_btn.add_theme_font_size_override("font_size", 17)
+	close_btn.add_theme_font_size_override("font_size", 21)
 	close_btn.add_theme_color_override("font_color", Color(0.55, 0.57, 0.70))
 	parent.add_child(close_btn)
 
@@ -587,7 +956,7 @@ func _make_empty_node_vis() -> Dictionary:
 	lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	lbl.position = Vector2(-56, 86)
 	lbl.size     = Vector2(112, 22)
-	lbl.add_theme_font_size_override("font_size", 12)
+	lbl.add_theme_font_size_override("font_size", 15)
 	lbl.add_theme_color_override("font_color", Color.WHITE)
 	return { "container": c, "parts": [], "sprite": null, "hp_bg": hp_bg,
 			 "hp_fill": hp_fill, "lbl": lbl, "max_hp": 10.0,
@@ -750,48 +1119,62 @@ func _flash_node_hit(slot_idx: int) -> void:
 	tw.tween_property(c, "scale", Vector2(1.0,  1.0),  0.22)
 
 func _build_location_bar() -> void:
-	var bg      := ColorRect.new()
-	bg.color     = Color(0.07, 0.08, 0.13, 0.72)
-	bg.position  = Vector2(0, HUD_H)
-	bg.size      = Vector2(SCREEN_W, LOC_BAR_H)
-	add_child(bg)
+	# Compact floating badge in its own CanvasLayer so it receives
+	# input before the full-area mine tap button (which is Node2D root).
+	const BW := 196
+	const BH := 44
+	const BX := SCREEN_W - BW - 8
+	const BY := MINE_Y + 10
 
-	# Accent underline (colour changes with active location)
+	var cl      := CanvasLayer.new()
+	cl.layer     = 12   # above mine (0), below HUD (10)? No — above Node2D, below HUD(10)
+	# Actually layer 12 is above HUD(10). Use layer 9 to sit just under HUD.
+	cl.layer     = 9
+	add_child(cl)
+
+	# Badge background
 	_loc_bar_accent         = ColorRect.new()
-	_loc_bar_accent.color   = C_TIMBER
-	_loc_bar_accent.position = Vector2(0, HUD_H + LOC_BAR_H - 4)
-	_loc_bar_accent.size    = Vector2(SCREEN_W, 4)
-	add_child(_loc_bar_accent)
+	_loc_bar_accent.color   = Color(0.07, 0.09, 0.14, 0.90)
+	_loc_bar_accent.position = Vector2(BX, BY)
+	_loc_bar_accent.size    = Vector2(BW, BH)
+	cl.add_child(_loc_bar_accent)
 
-	# Active location label
+	# Left accent stripe (colour changes with location)
+	var stripe      := ColorRect.new()
+	stripe.name      = "LocStripe"
+	stripe.color     = C_TIMBER
+	stripe.position  = Vector2(BX, BY)
+	stripe.size      = Vector2(4, BH)
+	cl.add_child(stripe)
+
+	# Location name label
 	_lbl_active_loc = Label.new()
-	_lbl_active_loc.text = "Lumber Yard"
-	_lbl_active_loc.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_active_loc.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-	_lbl_active_loc.position = Vector2(0, HUD_H)
-	_lbl_active_loc.size     = Vector2(SCREEN_W - 80, LOC_BAR_H)
-	_lbl_active_loc.add_theme_font_size_override("font_size", 18)
+	_lbl_active_loc.text                  = "Lumber Yard"
+	_lbl_active_loc.horizontal_alignment  = HORIZONTAL_ALIGNMENT_LEFT
+	_lbl_active_loc.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
+	_lbl_active_loc.position              = Vector2(BX + 10, BY)
+	_lbl_active_loc.size                  = Vector2(BW - 36, BH)
+	_lbl_active_loc.add_theme_font_size_override("font_size", 16)
 	_lbl_active_loc.add_theme_color_override("font_color", C_TEXT)
-	add_child(_lbl_active_loc)
+	cl.add_child(_lbl_active_loc)
 
-	# Chevron button (right side)
-	var chevron      := Button.new()
+	# Chevron
+	var chevron      := Label.new()
 	chevron.text      = "▼"
-	chevron.flat      = true
-	chevron.position  = Vector2(SCREEN_W - 72, HUD_H + 4)
-	chevron.size      = Vector2(64, LOC_BAR_H - 8)
-	chevron.add_theme_font_size_override("font_size", 20)
+	chevron.position  = Vector2(BX + BW - 28, BY)
+	chevron.size      = Vector2(24, BH)
+	chevron.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	chevron.add_theme_font_size_override("font_size", 13)
 	chevron.add_theme_color_override("font_color", C_DIM)
-	chevron.pressed.connect(_on_loc_picker_open)
-	add_child(chevron)
+	cl.add_child(chevron)
 
-	# Tap the whole bar to open picker too
-	var bar_btn      := Button.new()
-	bar_btn.flat      = true
-	bar_btn.position  = Vector2(0, HUD_H)
-	bar_btn.size      = Vector2(SCREEN_W - 72, LOC_BAR_H)
-	bar_btn.pressed.connect(_on_loc_picker_open)
-	add_child(bar_btn)
+	# Full badge tap button
+	var badge_btn      := Button.new()
+	badge_btn.flat      = true
+	badge_btn.position  = Vector2(BX, BY)
+	badge_btn.size      = Vector2(BW, BH)
+	badge_btn.pressed.connect(_on_loc_picker_open)
+	cl.add_child(badge_btn)
 
 func _build_loc_picker_panel() -> void:
 	_loc_picker_panel        = CanvasLayer.new()
@@ -832,7 +1215,7 @@ func _build_loc_picker_panel() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.position  = Vector2(card_x, card_y + 10)
 	title.size      = Vector2(card_w, 44)
-	title.add_theme_font_size_override("font_size", 20)
+	title.add_theme_font_size_override("font_size", 25)
 	title.add_theme_color_override("font_color", C_TEXT)
 	_loc_picker_panel.add_child(title)
 
@@ -851,25 +1234,41 @@ func _build_loc_picker_panel() -> void:
 	scroll.size      = Vector2(card_w - 24, card_h - 72)
 	_loc_picker_panel.add_child(scroll)
 
-	var vbox      := VBoxContainer.new()
-	vbox.size      = Vector2(card_w - 24, 0)
-	scroll.add_child(vbox)
+	_loc_picker_vbox      = VBoxContainer.new()
+	_loc_picker_vbox.size  = Vector2(card_w - 24, 0)
+	scroll.add_child(_loc_picker_vbox)
+	_rebuild_loc_picker_rows(card_w)
 
+func _rebuild_loc_picker_rows(card_w: float) -> void:
+	for ch: Node in _loc_picker_vbox.get_children():
+		ch.queue_free()
 	for loc_id: String in BuildDatabase.LOCATION_ORDER:
-		var loc_data := BuildDatabase.get_location(loc_id)
+		var loc_data  := BuildDatabase.get_location(loc_id)
 		var dname: String = loc_data.get("display_name", loc_id)
 		var mat: String   = loc_data.get("material", "timber")
 		var accent        := _mat_color(mat)
+		var unlocked: bool = _is_location_unlocked(loc_id)
+		var loc_idx: int   = BuildDatabase.LOCATION_ORDER.find(loc_id)
 
 		var row      := Button.new()
 		row.flat      = true
+		row.disabled  = not unlocked
 		row.custom_minimum_size = Vector2(card_w - 24, 100)
-		row.pressed.connect(_on_location_btn.bind(loc_id))
-		vbox.add_child(row)
+		if unlocked:
+			row.pressed.connect(_on_location_btn.bind(loc_id))
+		_loc_picker_vbox.add_child(row)
+
+		# Dim overlay for locked rows
+		if not unlocked:
+			var dim_rect      := ColorRect.new()
+			dim_rect.color     = Color(0, 0, 0, 0.55)
+			dim_rect.position  = Vector2.ZERO
+			dim_rect.size      = Vector2(card_w - 24, 100)
+			row.add_child(dim_rect)
 
 		# Coloured left strip
 		var strip      := ColorRect.new()
-		strip.color     = accent
+		strip.color     = accent if unlocked else C_DIM
 		strip.position  = Vector2(0, 8)
 		strip.size      = Vector2(6, 84)
 		row.add_child(strip)
@@ -877,28 +1276,82 @@ func _build_loc_picker_panel() -> void:
 		# Location name
 		var name_lbl      := Label.new()
 		name_lbl.text      = dname
-		name_lbl.position  = Vector2(20, 16)
-		name_lbl.size      = Vector2(card_w - 80, 36)
-		name_lbl.add_theme_font_size_override("font_size", 18)
-		name_lbl.add_theme_color_override("font_color", C_TEXT)
+		name_lbl.position  = Vector2(20, 14)
+		name_lbl.size      = Vector2(card_w - 80, 30)
+		name_lbl.add_theme_font_size_override("font_size", 22)
+		name_lbl.add_theme_color_override("font_color", C_TEXT if unlocked else C_DIM)
 		row.add_child(name_lbl)
 
-		# Material type label
-		var mat_lbl      := Label.new()
-		mat_lbl.text      = mat.capitalize()
-		mat_lbl.position  = Vector2(20, 54)
-		mat_lbl.size      = Vector2(card_w - 80, 28)
-		mat_lbl.add_theme_font_size_override("font_size", 14)
-		mat_lbl.add_theme_color_override("font_color", accent)
-		row.add_child(mat_lbl)
+		if unlocked:
+			# Material label
+			var mat_lbl      := Label.new()
+			mat_lbl.text      = mat.capitalize()
+			mat_lbl.position  = Vector2(20, 50)
+			mat_lbl.size      = Vector2(card_w - 80, 28)
+			mat_lbl.add_theme_font_size_override("font_size", 18)
+			mat_lbl.add_theme_color_override("font_color", accent)
+			row.add_child(mat_lbl)
+		else:
+			# Progress toward unlock
+			var prev_id: String = BuildDatabase.LOCATION_ORDER[loc_idx - 1]
+			var needed: int     = BuildDatabase.LOCATION_UNLOCK_NODES[loc_idx - 1]
+			var progress: int   = GameState.location_unlock_progress.get(prev_id, 0)
+			var prev_name: String = BuildDatabase.get_location(prev_id).get("display_name", prev_id)
+
+			var req_lbl      := Label.new()
+			req_lbl.text      = "Clear %d waves at %s" % [needed, prev_name]
+			req_lbl.position  = Vector2(20, 46)
+			req_lbl.size      = Vector2(card_w - 80, 22)
+			req_lbl.add_theme_font_size_override("font_size", 16)
+			req_lbl.add_theme_color_override("font_color", C_DIM)
+			row.add_child(req_lbl)
+
+			# Progress bar background
+			var bar_bg      := ColorRect.new()
+			bar_bg.color     = Color(0.15, 0.15, 0.15, 1.0)
+			bar_bg.position  = Vector2(20, 72)
+			bar_bg.size      = Vector2(card_w - 60, 12)
+			row.add_child(bar_bg)
+
+			# Progress bar fill
+			var bar_fill_w := float(card_w - 60) * clampf(float(progress) / float(needed), 0.0, 1.0)
+			if bar_fill_w > 0:
+				var bar_fill      := ColorRect.new()
+				bar_fill.color     = accent
+				bar_fill.position  = Vector2(20, 72)
+				bar_fill.size      = Vector2(bar_fill_w, 12)
+				row.add_child(bar_fill)
+
+			# Progress count label
+			var prog_lbl      := Label.new()
+			prog_lbl.text      = "%d / %d" % [progress, needed]
+			prog_lbl.position  = Vector2(card_w - 100, 68)
+			prog_lbl.size      = Vector2(72, 20)
+			prog_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+			prog_lbl.add_theme_font_size_override("font_size", 16)
+			prog_lbl.add_theme_color_override("font_color", accent)
+			row.add_child(prog_lbl)
 
 		# Separator
 		var sep      := ColorRect.new()
 		sep.color     = C_BORDER
 		sep.custom_minimum_size = Vector2(card_w - 24, 2)
-		vbox.add_child(sep)
+		_loc_picker_vbox.add_child(sep)
+
+## Returns true if loc_id is available to the player this contract.
+## lumber_yard is always unlocked. Each subsequent location requires the
+## previous one to have reached its LOCATION_UNLOCK_NODES threshold.
+func _is_location_unlocked(loc_id: String) -> bool:
+	var idx := BuildDatabase.LOCATION_ORDER.find(loc_id)
+	if idx <= 0:
+		return true  # first location always unlocked
+	var prev_id: String  = BuildDatabase.LOCATION_ORDER[idx - 1]
+	var needed: int      = BuildDatabase.LOCATION_UNLOCK_NODES[idx - 1]
+	var progress: int    = GameState.location_unlock_progress.get(prev_id, 0)
+	return progress >= needed
 
 func _on_loc_picker_open() -> void:
+	_rebuild_loc_picker_rows(660)
 	_loc_picker_panel.visible = true
 
 # ── Mine area ───────────────────────────────────────────────────────────────
@@ -943,21 +1396,146 @@ func _build_mine_area() -> void:
 		add_child(vis["container"])
 		_node_visuals.append(vis)
 
+	# ── Next-unlock badge (left edge, top of mine area) ────────────────────
+	const NW_X  := 8
+	const NW_Y  := MINE_Y + 12
+	const NW_W  := 152
+	const NW_H  := 66
+
+	_next_unlock_widget = Control.new()
+	_next_unlock_widget.position     = Vector2(NW_X, NW_Y)
+	_next_unlock_widget.size         = Vector2(NW_W, NW_H)
+	_next_unlock_widget.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_next_unlock_widget)
+
+	var nu_bg := ColorRect.new()
+	nu_bg.color = Color(0.06, 0.07, 0.12, 0.82)
+	nu_bg.size  = Vector2(NW_W, NW_H)
+	_next_unlock_widget.add_child(nu_bg)
+
+	var nu_top_bar := ColorRect.new()   # thin accent stripe at top
+	nu_top_bar.color    = C_TIMBER
+	nu_top_bar.name     = "TopBar"
+	nu_top_bar.position = Vector2(0, 0)
+	nu_top_bar.size     = Vector2(NW_W, 3)
+	_next_unlock_widget.add_child(nu_top_bar)
+
+	var nu_header := Label.new()
+	nu_header.text                   = "WAVES TO UNLOCK"
+	nu_header.position               = Vector2(0, 4)
+	nu_header.size                   = Vector2(NW_W, 18)
+	nu_header.horizontal_alignment   = HORIZONTAL_ALIGNMENT_CENTER
+	nu_header.add_theme_font_size_override("font_size", 12)
+	nu_header.add_theme_color_override("font_color", Color(0.55, 0.55, 0.6))
+	_next_unlock_widget.add_child(nu_header)
+
+	# Progress box (e.g. "71 / 50")
+	_nu_prog_bg = ColorRect.new()
+	_nu_prog_bg.color    = C_TIMBER * Color(1, 1, 1, 0.25)
+	_nu_prog_bg.position = Vector2(6, 24)
+	_nu_prog_bg.size     = Vector2(NW_W - 12, 22)
+	_next_unlock_widget.add_child(_nu_prog_bg)
+
+	_lbl_nu_progress = Label.new()
+	_lbl_nu_progress.position             = Vector2(6, 24)
+	_lbl_nu_progress.size                 = Vector2(NW_W - 12, 22)
+	_lbl_nu_progress.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_nu_progress.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_nu_progress.add_theme_font_size_override("font_size", 15)
+	_lbl_nu_progress.add_theme_color_override("font_color", Color.WHITE)
+	_next_unlock_widget.add_child(_lbl_nu_progress)
+
+	# Next location name
+	_lbl_nu_name = Label.new()
+	_lbl_nu_name.position             = Vector2(0, 48)
+	_lbl_nu_name.size                 = Vector2(NW_W, 18)
+	_lbl_nu_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_nu_name.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_nu_name.add_theme_font_size_override("font_size", 12)
+	_lbl_nu_name.add_theme_color_override("font_color", Color(0.75, 0.85, 1.0))
+	_next_unlock_widget.add_child(_lbl_nu_name)
+
 	# Info strip pinned to bottom of mine area
+	var info_bg := ColorRect.new()
+	info_bg.color    = Color(0, 0, 0, 0.45)
+	info_bg.position = Vector2(0, MINE_Y + MINE_H - 88)
+	info_bg.size     = Vector2(SCREEN_W, 88)
+	add_child(info_bg)
+
 	_lbl_mat_count                      = Label.new()
 	_lbl_mat_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_mat_count.position             = Vector2(0, MINE_Y + MINE_H - 80)
 	_lbl_mat_count.size                 = Vector2(SCREEN_W, 34)
-	_lbl_mat_count.add_theme_font_size_override("font_size", 18)
+	_lbl_mat_count.add_theme_font_size_override("font_size", 22)
+	_lbl_mat_count.add_theme_constant_override("outline_size", 4)
+	_lbl_mat_count.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	add_child(_lbl_mat_count)
 
 	_lbl_mine_rate                      = Label.new()
 	_lbl_mine_rate.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_mine_rate.position             = Vector2(0, MINE_Y + MINE_H - 44)
 	_lbl_mine_rate.size                 = Vector2(SCREEN_W, 30)
-	_lbl_mine_rate.add_theme_font_size_override("font_size", 13)
-	_lbl_mine_rate.add_theme_color_override("font_color", C_DIM)
+	_lbl_mine_rate.add_theme_font_size_override("font_size", 16)
+	_lbl_mine_rate.add_theme_color_override("font_color", Color(0.88, 0.88, 0.88))
+	_lbl_mine_rate.add_theme_constant_override("outline_size", 3)
+	_lbl_mine_rate.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
 	add_child(_lbl_mine_rate)
+
+	# ── Blasting Cap button (bottom-right of mine area, above info strip) ──────
+	var bc_w := 120
+	var bc_h := 52
+	var bc_x := SCREEN_W - bc_w - 10
+	var bc_y := MINE_Y + MINE_H - 88 - bc_h - 8  # just above info strip
+
+	var bc_bg      := ColorRect.new()
+	bc_bg.color     = Color(0.18, 0.08, 0.04, 0.92)
+	bc_bg.position  = Vector2(bc_x, bc_y)
+	bc_bg.size      = Vector2(bc_w, bc_h)
+	add_child(bc_bg)
+
+	var bc_bar      := ColorRect.new()
+	bc_bar.color     = Color(1.0, 0.4, 0.1)
+	bc_bar.position  = Vector2(bc_x, bc_y)
+	bc_bar.size      = Vector2(bc_w, 3)
+	add_child(bc_bar)
+
+	_btn_blast_cap          = Button.new()
+	_btn_blast_cap.flat      = true
+	_btn_blast_cap.text      = "💥 BLAST"
+	_btn_blast_cap.position  = Vector2(bc_x, bc_y)
+	_btn_blast_cap.size      = Vector2(bc_w, bc_h - 16)
+	_btn_blast_cap.add_theme_font_size_override("font_size", 17)
+	_btn_blast_cap.add_theme_color_override("font_color", Color(1.0, 0.55, 0.1))
+	_btn_blast_cap.pressed.connect(_on_blast_cap_fire)
+	add_child(_btn_blast_cap)
+
+	_lbl_blast_cooldown           = Label.new()
+	_lbl_blast_cooldown.position  = Vector2(bc_x, bc_y + bc_h - 18)
+	_lbl_blast_cooldown.size      = Vector2(bc_w, 18)
+	_lbl_blast_cooldown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_blast_cooldown.add_theme_font_size_override("font_size", 12)
+	_lbl_blast_cooldown.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
+	add_child(_lbl_blast_cooldown)
+
+	# Full-mine flash overlay (invisible until blast fires)
+	_blast_flash           = ColorRect.new()
+	_blast_flash.color     = Color(1.0, 0.6, 0.1, 0.0)
+	_blast_flash.position  = Vector2(0, MINE_Y)
+	_blast_flash.size      = Vector2(SCREEN_W, MINE_H)
+	_blast_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_blast_flash)
+
+	# ── Chest button (centre of mine, shown only when a chest is pending) ────
+	_btn_chest          = Button.new()
+	_btn_chest.flat      = true
+	_btn_chest.text      = "📦  Open"
+	_btn_chest.position  = Vector2(SCREEN_W / 2 - 80, MINE_Y + MINE_H / 2 - 30)
+	_btn_chest.size      = Vector2(160, 60)
+	_btn_chest.add_theme_font_size_override("font_size", 22)
+	_btn_chest.add_theme_color_override("font_color", Color(1.0, 0.85, 0.3))
+	_btn_chest.visible   = false
+	_btn_chest.pressed.connect(_on_chest_open)
+	add_child(_btn_chest)
 
 	# Floating feedback label
 	_lbl_feedback                      = Label.new()
@@ -965,7 +1543,7 @@ func _build_mine_area() -> void:
 	_lbl_feedback.position             = Vector2(0, MINE_Y + 30)
 	_lbl_feedback.size                 = Vector2(SCREEN_W, 44)
 	_lbl_feedback.modulate.a           = 0.0
-	_lbl_feedback.add_theme_font_size_override("font_size", 16)
+	_lbl_feedback.add_theme_font_size_override("font_size", 20)
 	_lbl_feedback.add_theme_color_override("font_color", C_GOLD)
 	add_child(_lbl_feedback)
 
@@ -974,7 +1552,9 @@ func _build_mine_area() -> void:
 	tap_btn.flat      = true
 	tap_btn.position  = Vector2(0, MINE_Y)
 	tap_btn.size      = Vector2(SCREEN_W, MINE_H)
-	tap_btn.pressed.connect(_on_tap_node)
+	# Single tap: fire immediately; hold: fires continuously via _process
+	tap_btn.button_down.connect(_on_mine_hold_start)
+	tap_btn.button_up.connect(_on_mine_hold_stop)
 	add_child(tap_btn)
 
 # ── Bottom bar (4 pinnable slots + MORE) ───────────────────────────────────
@@ -1026,7 +1606,7 @@ func _build_bottom_bar() -> void:
 	more_sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	more_sym.position  = Vector2(more_icon_x, bar_y + 20)
 	more_sym.size      = Vector2(icon_sz, icon_sz)
-	more_sym.add_theme_font_size_override("font_size", 22)
+	more_sym.add_theme_font_size_override("font_size", 28)
 	more_sym.add_theme_color_override("font_color", C_TEXT)
 	_bottom_bar_cl.add_child(more_sym)
 
@@ -1035,7 +1615,7 @@ func _build_bottom_bar() -> void:
 	more_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	more_lbl.position  = Vector2(more_x, bar_y + 60)
 	more_lbl.size      = Vector2(slot_w, 24)
-	more_lbl.add_theme_font_size_override("font_size", 11)
+	more_lbl.add_theme_font_size_override("font_size", 14)
 	more_lbl.add_theme_color_override("font_color", C_DIM)
 	_bottom_bar_cl.add_child(more_lbl)
 
@@ -1083,7 +1663,7 @@ func _rebuild_pin_slots() -> void:
 		sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		sym.position  = Vector2(icon_x, bar_y + 20)
 		sym.size      = Vector2(icon_sz, icon_sz)
-		sym.add_theme_font_size_override("font_size", 18)
+		sym.add_theme_font_size_override("font_size", 22)
 		sym.add_theme_color_override("font_color", Color.WHITE)
 		_bottom_bar_cl.add_child(sym)
 		_pin_slot_nodes.append(sym)
@@ -1093,7 +1673,7 @@ func _rebuild_pin_slots() -> void:
 		lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		lbl.position  = Vector2(x, bar_y + 60)
 		lbl.size      = Vector2(slot_w, 24)
-		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_font_size_override("font_size", 14)
 		lbl.add_theme_color_override("font_color", C_TEXT)
 		_bottom_bar_cl.add_child(lbl)
 		_pin_slot_nodes.append(lbl)
@@ -1128,25 +1708,39 @@ func _build_menu_overlay() -> void:
 	dim_btn.pressed.connect(_on_menu_close)
 	_menu_overlay.add_child(dim_btn)
 
+	# Dynamic items root — cleared and rebuilt each time menu opens
+	_menu_items_root          = Control.new()
+	_menu_items_root.position = Vector2.ZERO
+	_menu_items_root.size     = Vector2(SCREEN_W, SCREEN_H)
+	_menu_items_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_menu_overlay.add_child(_menu_items_root)
+	_rebuild_menu_items()
+
+func _rebuild_menu_items() -> void:
+	for ch in _menu_items_root.get_children():
+		ch.queue_free()
+
 	# Card — 3-column grid + "Edit Quick Bar" strip at bottom
 	var card_w   := 680
 	var card_x   := float(SCREEN_W - card_w) / 2.0
 
-	# Menu items — declare first so card height auto-fits item count
+	# Menu items — [label, accent_color, callback, optional_lock_fn]
+	# lock_fn: Callable() -> String; returns "" if unlocked, else lock requirement text.
 	var items: Array = [
-		["MINE",       C_TIMBER,              _on_menu_mine],
 		["BUILD",      C_ACCENT,              _on_menu_build],
 		["CRAFT",      C_LUMBER,              _on_menu_craft],
 		["SELL",       C_GOLD,                _on_menu_sell],
 		["CREW",       C_GREEN,               _on_menu_crew],
 		["SKYLINE",    C_STONE,               _on_menu_skyline],
 		["UPGRADES",   C_XP,                  _on_menu_upgrades],
+		["SKILL TREE", Color(0.6, 0.3, 1.0),  _on_menu_skill_tree,
+			func() -> String: return "" if GameState.skyline.size() >= 4 else "Build 4 structures"],
 		["CONTRACT",   C_GOLD,                _on_menu_contract],
-		["SHOP",       C_GEM,                 _on_shop_btn_pressed],
-		["MISSIONS",   C_GOLD,                _on_menu_missions],
-		["TOOLBOX",    Color(0.9, 0.5, 0.2),  _on_menu_toolbox],
-		["BLUEPRINTS", Color(0.4, 0.85, 1.0), _on_menu_blueprints],
-		["TRADE SHOW", Color(1.0, 0.85, 0.2), _on_menu_tradeshow],
+		["MISSIONS",   C_GOLD,                _on_menu_missions,
+			func() -> String: return "" if GameState.skyline.size() >= 10 else "Build 10 structures"],
+		["BLUEPRINTS", Color(0.4, 0.85, 1.0), _on_menu_blueprints,
+			func() -> String: return "" if GameState.skyline.size() >= 15 else "Build 15 structures"],
+		["STATS",      Color(0.6, 0.9, 1.0),  _on_menu_stats],
 	]
 	var cols      := 3
 	var rows      := ceili(float(items.size()) / float(cols))
@@ -1162,13 +1756,13 @@ func _build_menu_overlay() -> void:
 	card.color     = C_PANEL
 	card.position  = Vector2(card_x, card_y)
 	card.size      = Vector2(card_w, card_h)
-	_menu_overlay.add_child(card)
+	_menu_items_root.add_child(card)
 
 	var card_top      := ColorRect.new()
 	card_top.color     = C_ACCENT
 	card_top.position  = Vector2(card_x, card_y)
 	card_top.size      = Vector2(card_w, 4)
-	_menu_overlay.add_child(card_top)
+	_menu_items_root.add_child(card_top)
 
 	for i in items.size():
 		var col     := i % cols
@@ -1179,28 +1773,55 @@ func _build_menu_overlay() -> void:
 		var label:  String   = items[i][0]
 		var accent: Color    = items[i][1]
 		var cb:     Callable = items[i][2]
+		var lock_fn: Callable = items[i][3] if items[i].size() > 3 else Callable()
+		var lock_msg: String  = lock_fn.call() if lock_fn.is_valid() else ""
+		var is_locked: bool   = lock_msg != ""
 
 		var ibg      := ColorRect.new()
 		ibg.color     = C_CARD
 		ibg.position  = Vector2(item_x, item_y)
 		ibg.size      = Vector2(item_w, item_h)
-		_menu_overlay.add_child(ibg)
+		_menu_items_root.add_child(ibg)
 
 		var ibar      := ColorRect.new()
-		ibar.color     = accent
+		ibar.color     = accent if not is_locked else C_DIM
 		ibar.position  = Vector2(item_x, item_y)
 		ibar.size      = Vector2(item_w, 4)
-		_menu_overlay.add_child(ibar)
+		_menu_items_root.add_child(ibar)
 
 		var ibtn      := Button.new()
 		ibtn.flat      = true
-		ibtn.text      = label
+		ibtn.disabled  = is_locked
 		ibtn.position  = Vector2(item_x, item_y)
 		ibtn.size      = Vector2(item_w, item_h)
-		ibtn.pressed.connect(cb)
-		ibtn.add_theme_color_override("font_color", accent)
-		ibtn.add_theme_font_size_override("font_size", 17)
-		_menu_overlay.add_child(ibtn)
+		if not is_locked:
+			ibtn.pressed.connect(cb)
+		ibtn.add_theme_color_override("font_color", accent if not is_locked else C_DIM)
+		ibtn.add_theme_font_size_override("font_size", 21)
+		_menu_items_root.add_child(ibtn)
+
+		# Label drawn on top of button (so it shows even when disabled)
+		var ilbl      := Label.new()
+		ilbl.text      = label
+		ilbl.position  = Vector2(item_x, item_y + (30 if is_locked else 40))
+		ilbl.size      = Vector2(item_w, 40)
+		ilbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		ilbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+		ilbl.add_theme_color_override("font_color", accent if not is_locked else C_DIM)
+		ilbl.add_theme_font_size_override("font_size", 21)
+		ilbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_menu_items_root.add_child(ilbl)
+
+		if is_locked:
+			var lock_lbl      := Label.new()
+			lock_lbl.text      = "🔒 " + lock_msg
+			lock_lbl.position  = Vector2(item_x + 4, item_y + 70)
+			lock_lbl.size      = Vector2(item_w - 8, 28)
+			lock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			lock_lbl.add_theme_font_size_override("font_size", 13)
+			lock_lbl.add_theme_color_override("font_color", C_DIM)
+			lock_lbl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_menu_items_root.add_child(lock_lbl)
 
 	# Edit Quick Bar strip at bottom of card
 	var edit_y := card_y + 50 + pad + float(rows) * (item_h + pad)
@@ -1209,7 +1830,7 @@ func _build_menu_overlay() -> void:
 	edit_sep.color     = C_BORDER
 	edit_sep.position  = Vector2(card_x + pad, edit_y)
 	edit_sep.size      = Vector2(card_w - pad * 2, 1)
-	_menu_overlay.add_child(edit_sep)
+	_menu_items_root.add_child(edit_sep)
 
 	var edit_btn      := Button.new()
 	edit_btn.flat      = true
@@ -1218,8 +1839,8 @@ func _build_menu_overlay() -> void:
 	edit_btn.size      = Vector2(card_w - pad * 2, 48)
 	edit_btn.pressed.connect(_on_pin_edit_open)
 	edit_btn.add_theme_color_override("font_color", C_DIM)
-	edit_btn.add_theme_font_size_override("font_size", 14)
-	_menu_overlay.add_child(edit_btn)
+	edit_btn.add_theme_font_size_override("font_size", 18)
+	_menu_items_root.add_child(edit_btn)
 
 
 # ── Pin customiser panel (layer 28, between panels and menu) ────────────────
@@ -1269,7 +1890,7 @@ func _build_pin_panel() -> void:
 	title_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	title_lbl.position  = Vector2(card_x, card_y)
 	title_lbl.size      = Vector2(card_w, 52)
-	title_lbl.add_theme_font_size_override("font_size", 17)
+	title_lbl.add_theme_font_size_override("font_size", 21)
 	title_lbl.add_theme_color_override("font_color", C_TEXT)
 	_pin_panel.add_child(title_lbl)
 
@@ -1278,7 +1899,7 @@ func _build_pin_panel() -> void:
 	hint_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hint_lbl.position  = Vector2(card_x, card_y + 52)
 	hint_lbl.size      = Vector2(card_w, 26)
-	hint_lbl.add_theme_font_size_override("font_size", 12)
+	hint_lbl.add_theme_font_size_override("font_size", 15)
 	hint_lbl.add_theme_color_override("font_color", C_DIM)
 	_pin_panel.add_child(hint_lbl)
 
@@ -1328,7 +1949,7 @@ func _build_pin_panel() -> void:
 		sym.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		sym.position  = Vector2(icon_x, ty + 14)
 		sym.size      = Vector2(icon_sz, icon_sz)
-		sym.add_theme_font_size_override("font_size", 22)
+		sym.add_theme_font_size_override("font_size", 28)
 		sym.add_theme_color_override("font_color", Color.WHITE)
 		_pin_panel.add_child(sym)
 
@@ -1337,7 +1958,7 @@ func _build_pin_panel() -> void:
 		name_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		name_lbl.position  = Vector2(tx, ty + 70)
 		name_lbl.size      = Vector2(tile_w, 22)
-		name_lbl.add_theme_font_size_override("font_size", 11)
+		name_lbl.add_theme_font_size_override("font_size", 14)
 		name_lbl.add_theme_color_override("font_color", C_TEXT)
 		_pin_panel.add_child(name_lbl)
 
@@ -1346,7 +1967,7 @@ func _build_pin_panel() -> void:
 		pin_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		pin_lbl.position  = Vector2(tx, ty + 96)
 		pin_lbl.size      = Vector2(tile_w, 20)
-		pin_lbl.add_theme_font_size_override("font_size", 10)
+		pin_lbl.add_theme_font_size_override("font_size", 12)
 		pin_lbl.add_theme_color_override("font_color", C_GREEN)
 		_pin_panel.add_child(pin_lbl)
 		_pin_state_labels.append(pin_lbl)
@@ -1365,7 +1986,7 @@ func _build_pin_panel() -> void:
 	done_btn.text      = "DONE"
 	done_btn.position  = Vector2(card_x + 20, done_y)
 	done_btn.size      = Vector2(card_w - 40, 48)
-	done_btn.add_theme_font_size_override("font_size", 16)
+	done_btn.add_theme_font_size_override("font_size", 20)
 	done_btn.pressed.connect(_on_pin_edit_close)
 	_apply_btn_style(done_btn, C_ACCENT.darkened(0.35))
 	_pin_panel.add_child(done_btn)
@@ -1475,7 +2096,7 @@ func _build_build_panel() -> void:
 	_lbl_build_pct.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_lbl_build_pct.position             = Vector2(20, 432)
 	_lbl_build_pct.size                 = Vector2(SCREEN_W - 40, 26)
-	_lbl_build_pct.add_theme_font_size_override("font_size", 13)
+	_lbl_build_pct.add_theme_font_size_override("font_size", 16)
 	_lbl_build_pct.add_theme_color_override("font_color", C_TEXT)
 	_lbl_build_pct.visible              = false
 	_build_panel.add_child(_lbl_build_pct)
@@ -1504,7 +2125,7 @@ func _build_build_panel() -> void:
 	_btn_tap_build.size      = Vector2(SCREEN_W - 40, 500)
 	_btn_tap_build.pressed.connect(_on_tap_build)
 	_btn_tap_build.add_theme_color_override("font_color", C_ACCENT)
-	_btn_tap_build.add_theme_font_size_override("font_size", 28)
+	_btn_tap_build.add_theme_font_size_override("font_size", 35)
 	_btn_tap_build.visible   = false
 	_build_panel.add_child(_btn_tap_build)
 
@@ -1523,7 +2144,7 @@ func _build_build_panel() -> void:
 	_lbl_build_cooldown.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	_lbl_build_cooldown.position             = Vector2(20, 780)
 	_lbl_build_cooldown.size                 = Vector2(SCREEN_W - 40, 66)
-	_lbl_build_cooldown.add_theme_font_size_override("font_size", 18)
+	_lbl_build_cooldown.add_theme_font_size_override("font_size", 22)
 	_lbl_build_cooldown.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
 	_lbl_build_cooldown.visible              = false
 	_build_panel.add_child(_lbl_build_cooldown)
@@ -1534,7 +2155,7 @@ func _build_build_panel() -> void:
 	_lbl_property_income.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_property_income.position             = Vector2(20, 960)
 	_lbl_property_income.size                 = Vector2(SCREEN_W - 40, 28)
-	_lbl_property_income.add_theme_font_size_override("font_size", 14)
+	_lbl_property_income.add_theme_font_size_override("font_size", 18)
 	_lbl_property_income.add_theme_color_override("font_color", C_DIM)
 	_build_panel.add_child(_lbl_property_income)
 
@@ -1610,7 +2231,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	av_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	av_lbl.position = Vector2(28, card_y + 14)
 	av_lbl.size     = Vector2(58, 58)
-	av_lbl.add_theme_font_size_override("font_size", 26)
+	av_lbl.add_theme_font_size_override("font_size", 32)
 	av_lbl.add_theme_color_override("font_color", mat_color)
 	_crew_scroll_content.add_child(av_lbl)
 
@@ -1619,7 +2240,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	name_lbl.text     = template.display_name
 	name_lbl.position = Vector2(100, card_y + 12)
 	name_lbl.size     = Vector2(300, 32)
-	name_lbl.add_theme_font_size_override("font_size", 18)
+	name_lbl.add_theme_font_size_override("font_size", 22)
 	name_lbl.add_theme_color_override("font_color", C_TEXT)
 	_crew_scroll_content.add_child(name_lbl)
 
@@ -1631,7 +2252,7 @@ func _build_crew_card(template: CrewMemberResource, idx: int) -> void:
 	loc_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	loc_lbl.position = Vector2(420, card_y + 14)
 	loc_lbl.size     = Vector2(258, 26)
-	loc_lbl.add_theme_font_size_override("font_size", 12)
+	loc_lbl.add_theme_font_size_override("font_size", 15)
 	loc_lbl.add_theme_color_override("font_color", mat_color)
 	_crew_scroll_content.add_child(loc_lbl)
 	_crew_loc_labels.append(loc_lbl)
@@ -1756,7 +2377,7 @@ func _build_crew_loc_picker() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.position  = Vector2(cx, cy + 10)
 	title.size      = Vector2(CW, 42)
-	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_font_size_override("font_size", 22)
 	title.add_theme_color_override("font_color", C_TEXT)
 	_crew_loc_picker.add_child(title)
 
@@ -1776,57 +2397,68 @@ func _build_crew_loc_picker() -> void:
 	sep.size      = Vector2(CW, 2)
 	_crew_loc_picker.add_child(sep)
 
-	# Location rows
+	# Location rows — built in a Control container so visibility inherits from CanvasLayer
+	_crew_loc_rows_node = Control.new()
+	_crew_loc_rows_node.name    = "CrewLocRows"
+	_crew_loc_rows_node.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_crew_loc_picker.add_child(_crew_loc_rows_node)
+	_rebuild_crew_loc_rows(cx, cy, CW)
+
+func _rebuild_crew_loc_rows(cx: float, cy: float, cw: float) -> void:
+	for ch: Node in _crew_loc_rows_node.get_children():
+		ch.queue_free()
 	var row_y := cy + 62.0
 	for loc_id: String in BuildDatabase.LOCATION_ORDER:
-		var ld     := BuildDatabase.get_location(loc_id)
-		var mat    := ld.get("material", "timber") as String
-		var dname  := ld.get("display_name", loc_id) as String
-		var col    := _mat_color(mat)
+		if not _is_location_unlocked(loc_id):
+			continue
+		var ld    := BuildDatabase.get_location(loc_id)
+		var mat   := ld.get("material", "timber") as String
+		var dname := ld.get("display_name", loc_id) as String
+		var col   := _mat_color(mat)
 
 		var row_btn      := Button.new()
 		row_btn.flat      = true
 		row_btn.position  = Vector2(cx, row_y)
-		row_btn.size      = Vector2(CW, 76)
+		row_btn.size      = Vector2(cw, 76)
 		row_btn.pressed.connect(_on_crew_loc_selected.bind(loc_id))
-		_crew_loc_picker.add_child(row_btn)
+		_crew_loc_rows_node.add_child(row_btn)
 
-		# Colour strip
 		var lstrip      := ColorRect.new()
 		lstrip.color     = col
 		lstrip.position  = Vector2(0, 10)
 		lstrip.size      = Vector2(5, 56)
 		row_btn.add_child(lstrip)
 
-		# Location name
 		var nlbl      := Label.new()
 		nlbl.text      = dname
 		nlbl.position  = Vector2(18, 10)
-		nlbl.size      = Vector2(CW - 28, 34)
-		nlbl.add_theme_font_size_override("font_size", 16)
+		nlbl.size      = Vector2(cw - 28, 34)
+		nlbl.add_theme_font_size_override("font_size", 20)
 		nlbl.add_theme_color_override("font_color", C_TEXT)
 		row_btn.add_child(nlbl)
 
-		# Material sub-label
 		var mlbl      := Label.new()
 		mlbl.text      = mat.replace("_", " ").capitalize()
 		mlbl.position  = Vector2(18, 44)
-		mlbl.size      = Vector2(CW - 28, 24)
-		mlbl.add_theme_font_size_override("font_size", 12)
+		mlbl.size      = Vector2(cw - 28, 24)
+		mlbl.add_theme_font_size_override("font_size", 15)
 		mlbl.add_theme_color_override("font_color", col)
 		row_btn.add_child(mlbl)
 
-		# Divider
 		var div      := ColorRect.new()
 		div.color     = C_BORDER
 		div.position  = Vector2(cx, row_y + 76)
-		div.size      = Vector2(CW, 1)
-		_crew_loc_picker.add_child(div)
+		div.size      = Vector2(cw, 1)
+		_crew_loc_rows_node.add_child(div)
 
 		row_y += 77.0
 
 func _on_crew_move_pressed(crew_id: String) -> void:
 	_crew_loc_picker_for   = crew_id
+	_rebuild_crew_loc_rows(
+		float(SCREEN_W - 580) / 2.0,
+		float(SCREEN_H - 740) / 2.0,
+		580.0)
 	_crew_loc_picker.visible = true
 
 func _on_crew_loc_selected(loc_id: String) -> void:
@@ -1873,7 +2505,7 @@ func _build_craft_panel() -> void:
 	inv_title.position = Vector2(28, 92)
 	inv_title.size     = Vector2(200, 22)
 	inv_title.add_theme_color_override("font_color", C_DIM)
-	inv_title.add_theme_font_size_override("font_size", 12)
+	inv_title.add_theme_font_size_override("font_size", 15)
 	_craft_panel.add_child(inv_title)
 
 	# 16 materials: 8 raw (rows 1-2), 8 refined (rows 3-4)
@@ -1909,7 +2541,7 @@ func _build_craft_panel() -> void:
 		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		lbl.position = Vector2(14 + col * inv_cell_w, row_y)
 		lbl.size     = Vector2(inv_cell_w, 48)
-		lbl.add_theme_font_size_override("font_size", 11)
+		lbl.add_theme_font_size_override("font_size", 14)
 		lbl.add_theme_color_override("font_color", inv_defs[i][1] as Color)
 		_craft_panel.add_child(lbl)
 		_craft_inv_lbls.append(lbl)
@@ -1978,7 +2610,7 @@ func _build_craft_panel() -> void:
 		ref_lbl.text     = ref_name
 		ref_lbl.position = Vector2(18, 12)
 		ref_lbl.size     = Vector2(400, 36)
-		ref_lbl.add_theme_font_size_override("font_size", 20)
+		ref_lbl.add_theme_font_size_override("font_size", 25)
 		ref_lbl.add_theme_color_override("font_color", accent)
 		card.add_child(ref_lbl)
 
@@ -2051,7 +2683,7 @@ func _build_wall_panel() -> void:
 	_lbl_wall_title.position             = Vector2(56, 282)
 	_lbl_wall_title.size                 = Vector2(608, 58)
 	_lbl_wall_title.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
-	_lbl_wall_title.add_theme_font_size_override("font_size", 22)
+	_lbl_wall_title.add_theme_font_size_override("font_size", 28)
 	_lbl_wall_title.add_theme_color_override("font_color", C_RED)
 	_wall_panel.add_child(_lbl_wall_title)
 
@@ -2102,7 +2734,7 @@ func _build_skyline_panel() -> void:
 	_lbl_skyline_stats.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
 	_lbl_skyline_stats.position             = Vector2(16, 82)
 	_lbl_skyline_stats.size                 = Vector2(SCREEN_W - 32, 44)
-	_lbl_skyline_stats.add_theme_font_size_override("font_size", 13)
+	_lbl_skyline_stats.add_theme_font_size_override("font_size", 16)
 	_lbl_skyline_stats.add_theme_color_override("font_color", C_DIM)
 	_skyline_panel.add_child(_lbl_skyline_stats)
 
@@ -2126,7 +2758,7 @@ func _build_skyline_panel() -> void:
 	_btn_new_contract          = Button.new()
 	_btn_new_contract.position = Vector2(60, SCREEN_H - BOTTOM_BAR_H - 84)
 	_btn_new_contract.size     = Vector2(SCREEN_W - 120, 76)
-	_btn_new_contract.add_theme_font_size_override("font_size", 17)
+	_btn_new_contract.add_theme_font_size_override("font_size", 21)
 	_btn_new_contract.pressed.connect(_on_new_contract_pressed)
 	_apply_btn_style(_btn_new_contract, C_GREEN.darkened(0.35))
 	_skyline_panel.add_child(_btn_new_contract)
@@ -2171,7 +2803,7 @@ func _build_sell_panel() -> void:
 	sub.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
 	sub.position  = Vector2(20, 84)
 	sub.size      = Vector2(SCREEN_W - 40, 36)
-	sub.add_theme_font_size_override("font_size", 12)
+	sub.add_theme_font_size_override("font_size", 15)
 	sub.add_theme_color_override("font_color", C_DIM)
 	_sell_panel.add_child(sub)
 
@@ -2225,7 +2857,7 @@ func _build_sell_panel() -> void:
 		name_lbl.text     = mname
 		name_lbl.position = Vector2(18, 10)
 		name_lbl.size     = Vector2(320, 32)
-		name_lbl.add_theme_font_size_override("font_size", 18)
+		name_lbl.add_theme_font_size_override("font_size", 22)
 		name_lbl.add_theme_color_override("font_color", accent)
 		card.add_child(name_lbl)
 
@@ -2234,7 +2866,7 @@ func _build_sell_panel() -> void:
 		price_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		price_lbl.position = Vector2(360, 14)
 		price_lbl.size     = Vector2(340, 24)
-		price_lbl.add_theme_font_size_override("font_size", 13)
+		price_lbl.add_theme_font_size_override("font_size", 16)
 		price_lbl.add_theme_color_override("font_color", C_GOLD)
 		card.add_child(price_lbl)
 
@@ -2242,7 +2874,7 @@ func _build_sell_panel() -> void:
 		inv_lbl.text     = "Have: 0"
 		inv_lbl.position = Vector2(18, 46)
 		inv_lbl.size     = Vector2(280, 26)
-		inv_lbl.add_theme_font_size_override("font_size", 13)
+		inv_lbl.add_theme_font_size_override("font_size", 16)
 		inv_lbl.add_theme_color_override("font_color", C_DIM)
 		card.add_child(inv_lbl)
 		_sell_inv_lbls.append(inv_lbl)
@@ -2252,7 +2884,7 @@ func _build_sell_panel() -> void:
 		earn_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		earn_lbl.position = Vector2(360, 46)
 		earn_lbl.size     = Vector2(340, 26)
-		earn_lbl.add_theme_font_size_override("font_size", 13)
+		earn_lbl.add_theme_font_size_override("font_size", 16)
 		earn_lbl.add_theme_color_override("font_color", C_GOLD)
 		card.add_child(earn_lbl)
 		_sell_earn_lbls.append(earn_lbl)
@@ -2267,7 +2899,7 @@ func _build_sell_panel() -> void:
 			btn.position = Vector2(18 + bi * (btn_w + 8), 80)
 			btn.size     = Vector2(btn_w, 40)
 			btn.pressed.connect(_on_sell_pressed.bind(mid, int(btn_defs[bi][1])))
-			btn.add_theme_font_size_override("font_size", 13)
+			btn.add_theme_font_size_override("font_size", 16)
 			_apply_btn_style(btn, btn_bgs[bi])
 			card.add_child(btn)
 
@@ -2327,7 +2959,7 @@ func _build_upgrades_panel() -> void:
 	sub.text     = "Unlocked by player level  ·  costs multiply ×2 per level"
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.custom_minimum_size  = Vector2(SCREEN_W, 32)
-	sub.add_theme_font_size_override("font_size", 12)
+	sub.add_theme_font_size_override("font_size", 15)
 	sub.add_theme_color_override("font_color", C_DIM)
 	list.add_child(sub)
 
@@ -2370,7 +3002,7 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	name_lbl.text     = u["name"]
 	name_lbl.position = Vector2(18, 10)
 	name_lbl.size     = Vector2(460, 34)
-	name_lbl.add_theme_font_size_override("font_size", 17)
+	name_lbl.add_theme_font_size_override("font_size", 21)
 	name_lbl.add_theme_color_override("font_color", accent)
 	outer.add_child(name_lbl)
 
@@ -2379,7 +3011,7 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	unlock_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	unlock_lbl.position = Vector2(488, 10)
 	unlock_lbl.size     = Vector2(220, 28)
-	unlock_lbl.add_theme_font_size_override("font_size", 13)
+	unlock_lbl.add_theme_font_size_override("font_size", 16)
 	unlock_lbl.add_theme_color_override("font_color", C_DIM)
 	outer.add_child(unlock_lbl)
 
@@ -2387,7 +3019,7 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	desc_lbl.text     = u["description"]
 	desc_lbl.position = Vector2(18, 46)
 	desc_lbl.size     = Vector2(SCREEN_W - 36, 28)
-	desc_lbl.add_theme_font_size_override("font_size", 13)
+	desc_lbl.add_theme_font_size_override("font_size", 16)
 	desc_lbl.add_theme_color_override("font_color", C_DIM)
 	outer.add_child(desc_lbl)
 
@@ -2402,7 +3034,7 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	cost_lbl.text     = ""
 	cost_lbl.position = Vector2(18, 100)
 	cost_lbl.size     = Vector2(440, 26)
-	cost_lbl.add_theme_font_size_override("font_size", 13)
+	cost_lbl.add_theme_font_size_override("font_size", 16)
 	cost_lbl.add_theme_color_override("font_color", C_GOLD)
 	outer.add_child(cost_lbl)
 
@@ -2449,7 +3081,7 @@ func _build_skills_tab(scroll: ScrollContainer) -> void:
 	_lbl_sp_count.position = Vector2(0, 10)
 	_lbl_sp_count.size     = Vector2(SCREEN_W, 26)
 	_lbl_sp_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_sp_count.add_theme_font_size_override("font_size", 15)
+	_lbl_sp_count.add_theme_font_size_override("font_size", 19)
 	_lbl_sp_count.add_theme_color_override("font_color", C_XP)
 	sp_bg.add_child(_lbl_sp_count)
 
@@ -2489,7 +3121,7 @@ func _build_branch_column(branch_id: String) -> VBoxContainer:
 	lbl_n.position = Vector2(2, 8)
 	lbl_n.size     = Vector2(col_w - 4, 22)
 	lbl_n.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_n.add_theme_font_size_override("font_size", 13)
+	lbl_n.add_theme_font_size_override("font_size", 16)
 	lbl_n.add_theme_color_override("font_color", bc)
 	header.add_child(lbl_n)
 
@@ -2498,7 +3130,7 @@ func _build_branch_column(branch_id: String) -> VBoxContainer:
 	lbl_s.position = Vector2(2, 32)
 	lbl_s.size     = Vector2(col_w - 4, 18)
 	lbl_s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	lbl_s.add_theme_font_size_override("font_size", 9)
+	lbl_s.add_theme_font_size_override("font_size", 12)
 	lbl_s.add_theme_color_override("font_color", C_DIM)
 	lbl_s.clip_text = true
 	header.add_child(lbl_s)
@@ -2513,7 +3145,7 @@ func _build_branch_column(branch_id: String) -> VBoxContainer:
 			arrow.text = "▼"
 			arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			arrow.custom_minimum_size  = Vector2(col_w, 16)
-			arrow.add_theme_font_size_override("font_size", 9)
+			arrow.add_theme_font_size_override("font_size", 12)
 			arrow.add_theme_color_override("font_color", C_BORDER)
 			col.add_child(arrow)
 
@@ -2535,7 +3167,7 @@ func _build_skill_card(parent: VBoxContainer, s: Dictionary, bc: Color, col_w: i
 	name_lbl.text     = s["name"]
 	name_lbl.position = Vector2(7, 5)
 	name_lbl.size     = Vector2(col_w - 10, 20)
-	name_lbl.add_theme_font_size_override("font_size", 11)
+	name_lbl.add_theme_font_size_override("font_size", 14)
 	name_lbl.add_theme_color_override("font_color", bc)
 	name_lbl.clip_text = true
 	outer.add_child(name_lbl)
@@ -2544,7 +3176,7 @@ func _build_skill_card(parent: VBoxContainer, s: Dictionary, bc: Color, col_w: i
 	desc_lbl.text     = s["desc"]
 	desc_lbl.position = Vector2(7, 25)
 	desc_lbl.size     = Vector2(col_w - 10, 18)
-	desc_lbl.add_theme_font_size_override("font_size", 10)
+	desc_lbl.add_theme_font_size_override("font_size", 12)
 	desc_lbl.add_theme_color_override("font_color", C_DIM)
 	desc_lbl.clip_text = true
 	outer.add_child(desc_lbl)
@@ -2553,7 +3185,7 @@ func _build_skill_card(parent: VBoxContainer, s: Dictionary, bc: Color, col_w: i
 	cost_lbl.text     = "1 SP"
 	cost_lbl.position = Vector2(7, 44)
 	cost_lbl.size     = Vector2(col_w - 10, 18)
-	cost_lbl.add_theme_font_size_override("font_size", 10)
+	cost_lbl.add_theme_font_size_override("font_size", 12)
 	cost_lbl.add_theme_color_override("font_color", C_GOLD)
 	outer.add_child(cost_lbl)
 
@@ -2657,7 +3289,7 @@ func _build_contract_panel() -> void:
 	_lbl_contract_rep.position  = Vector2(16, 88)
 	_lbl_contract_rep.size      = Vector2(SCREEN_W - 32, 52)
 	_lbl_contract_rep.add_theme_color_override("font_color", C_GOLD)
-	_lbl_contract_rep.add_theme_font_size_override("font_size", 18)
+	_lbl_contract_rep.add_theme_font_size_override("font_size", 22)
 	_contract_panel.add_child(_lbl_contract_rep)
 
 	# Scrollable body (artifacts + portfolio)
@@ -2676,7 +3308,7 @@ func _build_contract_panel() -> void:
 	art_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	art_hdr.custom_minimum_size  = Vector2(SCREEN_W, 48)
 	art_hdr.add_theme_color_override("font_color", C_GOLD)
-	art_hdr.add_theme_font_size_override("font_size", 16)
+	art_hdr.add_theme_font_size_override("font_size", 20)
 	vbox.add_child(art_hdr)
 
 	_artifact_cards = []
@@ -2704,7 +3336,7 @@ func _build_contract_panel() -> void:
 	port_hdr.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	port_hdr.custom_minimum_size  = Vector2(SCREEN_W, 48)
 	port_hdr.add_theme_color_override("font_color", C_DIM)
-	port_hdr.add_theme_font_size_override("font_size", 16)
+	port_hdr.add_theme_font_size_override("font_size", 20)
 	vbox.add_child(port_hdr)
 
 	_portfolio_list_box      = VBoxContainer.new()
@@ -2733,7 +3365,7 @@ func _build_artifact_card(parent: VBoxContainer, a: Dictionary) -> Dictionary:
 	name_lbl.text     = a["name"]
 	name_lbl.position = Vector2(18, 10)
 	name_lbl.size     = Vector2(440, 34)
-	name_lbl.add_theme_font_size_override("font_size", 17)
+	name_lbl.add_theme_font_size_override("font_size", 21)
 	name_lbl.add_theme_color_override("font_color", C_GOLD)
 	outer.add_child(name_lbl)
 
@@ -2741,7 +3373,7 @@ func _build_artifact_card(parent: VBoxContainer, a: Dictionary) -> Dictionary:
 	desc_lbl.text     = a["description"]
 	desc_lbl.position = Vector2(18, 46)
 	desc_lbl.size     = Vector2(440, 28)
-	desc_lbl.add_theme_font_size_override("font_size", 13)
+	desc_lbl.add_theme_font_size_override("font_size", 16)
 	desc_lbl.add_theme_color_override("font_color", C_DIM)
 	outer.add_child(desc_lbl)
 
@@ -2756,7 +3388,7 @@ func _build_artifact_card(parent: VBoxContainer, a: Dictionary) -> Dictionary:
 	cost_lbl.text     = "Cost: 1 RP"
 	cost_lbl.position = Vector2(242, 78)
 	cost_lbl.size     = Vector2(220, 28)
-	cost_lbl.add_theme_font_size_override("font_size", 13)
+	cost_lbl.add_theme_font_size_override("font_size", 16)
 	cost_lbl.add_theme_color_override("font_color", C_GOLD)
 	outer.add_child(cost_lbl)
 
@@ -2821,7 +3453,7 @@ func _build_prestige_confirm_panel() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.position  = Vector2(card_x, card_y + 18)
 	title.size      = Vector2(card_w, 48)
-	title.add_theme_font_size_override("font_size", 24)
+	title.add_theme_font_size_override("font_size", 30)
 	title.add_theme_color_override("font_color", C_TEXT)
 	_prestige_confirm_panel.add_child(title)
 
@@ -2830,7 +3462,7 @@ func _build_prestige_confirm_panel() -> void:
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.position  = Vector2(card_x, card_y + 66)
 	sub.size      = Vector2(card_w, 30)
-	sub.add_theme_font_size_override("font_size", 14)
+	sub.add_theme_font_size_override("font_size", 18)
 	sub.add_theme_color_override("font_color", C_DIM)
 	_prestige_confirm_panel.add_child(sub)
 
@@ -2847,7 +3479,7 @@ func _build_prestige_confirm_panel() -> void:
 	_lbl_prestige_rep_earned.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_prestige_rep_earned.position  = Vector2(card_x, card_y + 116)
 	_lbl_prestige_rep_earned.size      = Vector2(card_w, 38)
-	_lbl_prestige_rep_earned.add_theme_font_size_override("font_size", 22)
+	_lbl_prestige_rep_earned.add_theme_font_size_override("font_size", 28)
 	_lbl_prestige_rep_earned.add_theme_color_override("font_color", C_GOLD)
 	_prestige_confirm_panel.add_child(_lbl_prestige_rep_earned)
 
@@ -2856,7 +3488,7 @@ func _build_prestige_confirm_panel() -> void:
 	_lbl_prestige_new_rep.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_prestige_new_rep.position  = Vector2(card_x, card_y + 158)
 	_lbl_prestige_new_rep.size      = Vector2(card_w, 28)
-	_lbl_prestige_new_rep.add_theme_font_size_override("font_size", 14)
+	_lbl_prestige_new_rep.add_theme_font_size_override("font_size", 18)
 	_lbl_prestige_new_rep.add_theme_color_override("font_color", C_DIM)
 	_prestige_confirm_panel.add_child(_lbl_prestige_new_rep)
 
@@ -2872,7 +3504,7 @@ func _build_prestige_confirm_panel() -> void:
 	resets_lbl.text      = "RESETS:"
 	resets_lbl.position  = Vector2(card_x + 28, card_y + 210)
 	resets_lbl.size      = Vector2(card_w - 56, 26)
-	resets_lbl.add_theme_font_size_override("font_size", 13)
+	resets_lbl.add_theme_font_size_override("font_size", 16)
 	resets_lbl.add_theme_color_override("font_color", C_RED)
 	_prestige_confirm_panel.add_child(resets_lbl)
 
@@ -2880,7 +3512,7 @@ func _build_prestige_confirm_panel() -> void:
 	resets_val.text      = "Cash  ·  Materials  ·  Crew  ·  Upgrades  ·  Level"
 	resets_val.position  = Vector2(card_x + 28, card_y + 236)
 	resets_val.size      = Vector2(card_w - 56, 28)
-	resets_val.add_theme_font_size_override("font_size", 14)
+	resets_val.add_theme_font_size_override("font_size", 18)
 	resets_val.add_theme_color_override("font_color", C_TEXT)
 	resets_val.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_prestige_confirm_panel.add_child(resets_val)
@@ -2889,7 +3521,7 @@ func _build_prestige_confirm_panel() -> void:
 	keeps_lbl.text      = "KEEPS:"
 	keeps_lbl.position  = Vector2(card_x + 28, card_y + 280)
 	keeps_lbl.size      = Vector2(card_w - 56, 26)
-	keeps_lbl.add_theme_font_size_override("font_size", 13)
+	keeps_lbl.add_theme_font_size_override("font_size", 16)
 	keeps_lbl.add_theme_color_override("font_color", C_GREEN)
 	_prestige_confirm_panel.add_child(keeps_lbl)
 
@@ -2897,7 +3529,7 @@ func _build_prestige_confirm_panel() -> void:
 	keeps_val.text      = "Gems  ·  Reputation Points  ·  Portfolio  ·  Artifacts"
 	keeps_val.position  = Vector2(card_x + 28, card_y + 306)
 	keeps_val.size      = Vector2(card_w - 56, 28)
-	keeps_val.add_theme_font_size_override("font_size", 14)
+	keeps_val.add_theme_font_size_override("font_size", 18)
 	keeps_val.add_theme_color_override("font_color", C_TEXT)
 	keeps_val.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_prestige_confirm_panel.add_child(keeps_val)
@@ -2915,7 +3547,7 @@ func _build_prestige_confirm_panel() -> void:
 	warn.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	warn.position  = Vector2(card_x, card_y + 354)
 	warn.size      = Vector2(card_w, 28)
-	warn.add_theme_font_size_override("font_size", 13)
+	warn.add_theme_font_size_override("font_size", 16)
 	warn.add_theme_color_override("font_color", C_DIM)
 	_prestige_confirm_panel.add_child(warn)
 
@@ -2924,7 +3556,7 @@ func _build_prestige_confirm_panel() -> void:
 	confirm_btn.text     = "SIGN CONTRACT"
 	confirm_btn.position = Vector2(card_x + 20, card_y + 390)
 	confirm_btn.size     = Vector2(int((card_w - 56) / 2.0), 80)
-	confirm_btn.add_theme_font_size_override("font_size", 18)
+	confirm_btn.add_theme_font_size_override("font_size", 22)
 	confirm_btn.pressed.connect(_on_prestige_confirmed)
 	_apply_btn_style(confirm_btn, C_GREEN.darkened(0.30))
 	_prestige_confirm_panel.add_child(confirm_btn)
@@ -2934,7 +3566,7 @@ func _build_prestige_confirm_panel() -> void:
 	cancel_btn.text     = "CANCEL"
 	cancel_btn.position = Vector2(card_x + 36 + int((card_w - 56) / 2.0), card_y + 390)
 	cancel_btn.size     = Vector2(int((card_w - 56) / 2.0), 80)
-	cancel_btn.add_theme_font_size_override("font_size", 18)
+	cancel_btn.add_theme_font_size_override("font_size", 22)
 	cancel_btn.pressed.connect(_on_prestige_cancel)
 	_apply_btn_style(cancel_btn, Color(0.18, 0.20, 0.30), C_DIM)
 	_prestige_confirm_panel.add_child(cancel_btn)
@@ -3042,7 +3674,7 @@ func _build_shop_panel() -> void:
 	item_name.text     = "Instant Stage Skip"
 	item_name.position = Vector2(36, 230)
 	item_name.size     = Vector2(SCREEN_W - 72, 38)
-	item_name.add_theme_font_size_override("font_size", 18)
+	item_name.add_theme_font_size_override("font_size", 22)
 	item_name.add_theme_color_override("font_color", C_TEXT)
 	_shop_panel.add_child(item_name)
 
@@ -3082,6 +3714,7 @@ func _build_shop_panel() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _close_all_panels() -> void:
+	_mine_hold_active = false  # cancel hold-to-mine when any panel opens
 	_build_panel.visible           = false
 	_crew_panel.visible            = false
 	_craft_panel.visible           = false
@@ -3096,6 +3729,7 @@ func _close_all_panels() -> void:
 	_blueprints_panel.visible      = false
 	_tradeshow_panel.visible       = false
 	_toolbox_panel.visible         = false
+	_stats_panel.visible           = false
 	_menu_overlay.visible          = false
 	_loc_picker_panel.visible      = false
 	_pin_panel.visible             = false
@@ -3103,6 +3737,8 @@ func _close_all_panels() -> void:
 func _on_menu_btn_pressed() -> void:
 	var opening := not _menu_overlay.visible
 	_close_all_panels()
+	if opening:
+		_rebuild_menu_items()  # refresh lock states on each open
 	_menu_overlay.visible = opening
 
 func _on_menu_close() -> void:
@@ -3231,6 +3867,8 @@ func _on_sell_pressed(mat_id: String, qty: int) -> void:
 	GameState.materials[mat_id] = have - sell_qty
 	GameState.cash              += earned
 	MissionManager.add_progress("sell_cash", "", earned)
+	GameState.materials_sold    += 1
+	_check_intro_tasks()
 	_update_sell_panel()
 	_update_hud()
 	_flash_feedback("Sold %d %s  +$ %d" % [sell_qty, mat_id.capitalize(), earned])
@@ -3254,6 +3892,11 @@ func _on_menu_upgrades() -> void:
 	_update_upgrades_panel()
 	if _upgrades_tab_active == "skills":
 		_update_skills_tab()
+
+func _on_menu_skill_tree() -> void:
+	_close_all_panels()
+	_upgrades_panel.visible = true
+	_on_upgrades_tab("skills")
 
 func _on_upgrades_close() -> void:
 	_upgrades_panel.visible = false
@@ -3285,6 +3928,7 @@ func _on_prestige_confirmed() -> void:
 	_update_skyline_panel()
 	_update_contract_panel()
 	_flash_feedback("New Contract signed!  +%d Rep" % rep)
+	_check_intro_tasks()
 
 func _on_prestige_cancel() -> void:
 	_prestige_confirm_panel.visible = false
@@ -3351,6 +3995,7 @@ func _on_upgrade_buy(upgrade_id: String) -> void:
 	_update_upgrades_panel()
 	_update_hud()
 	_flash_feedback("%s  Lv.%d!" % [u["name"], new_level])
+	_check_intro_tasks()
 
 func _update_upgrades_panel() -> void:
 	var all_upgrades := UpgradeDatabase.get_all()
@@ -3428,16 +4073,58 @@ func _on_shop_close() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _on_location_btn(loc_id: String) -> void:
+	if not _is_location_unlocked(loc_id):
+		return
 	if GameState.active_location_id == loc_id:
 		_loc_picker_panel.visible = false
 		return
 	GameState.active_location_id = loc_id
+	# Tutorial: track first visits
+	if loc_id == "stone_quarry": GameState.visited_stone_quarry = 1
+	if loc_id == "sand_pit":     GameState.visited_sand_pit     = 1
+	_check_intro_tasks()
 	_loc_picker_panel.visible = false
 	_update_mine_screen()
 
-func _on_tap_node() -> void:
+func _on_blast_cap_fire() -> void:
+	var now := Time.get_unix_time_from_system()
+	if now < GameState.blasting_cap_cooldown_until:
+		return  # still on cooldown
+	var mp := float(GameState.get_mine_power())
+	_apply_node_damage(GameState.active_location_id, mp)
+	GameState.blasting_caps_fired          += 1
+	GameState.blasting_cap_cooldown_until   = now + BLAST_COOLDOWN
+	_check_intro_tasks()
+	# Flash animation
+	_blast_flash.modulate.a = 0.55
+	var tw := create_tween()
+	tw.tween_property(_blast_flash, "modulate:a", 0.0, 0.5)
+	_flash_feedback("💥 BLAST CAP!")
+	_update_blast_cap_btn()
+
+func _update_blast_cap_btn() -> void:
+	var remaining := GameState.blasting_cap_cooldown_until - Time.get_unix_time_from_system()
+	if remaining <= 0.0:
+		_btn_blast_cap.disabled           = false
+		_btn_blast_cap.add_theme_color_override("font_color", Color(1.0, 0.55, 0.1))
+		_lbl_blast_cooldown.text          = "READY"
+		_lbl_blast_cooldown.add_theme_color_override("font_color", Color(0.3, 1.0, 0.4))
+	else:
+		_btn_blast_cap.disabled           = true
+		_btn_blast_cap.add_theme_color_override("font_color", Color(0.4, 0.4, 0.4))
+		_lbl_blast_cooldown.text          = "%.0fs" % remaining
+		_lbl_blast_cooldown.add_theme_color_override("font_color", Color(0.65, 0.65, 0.65))
+
+func _on_mine_hold_start() -> void:
+	# Fire immediately on press, then hold loop takes over
 	var mp := GameState.get_mine_power()
 	_apply_node_damage(GameState.active_location_id, float(mp))
+	_mine_hold_active = true
+	_mine_hold_timer  = 0.0
+
+func _on_mine_hold_stop() -> void:
+	_mine_hold_active = false
+	_mine_hold_timer  = 0.0
 
 func _apply_node_damage(loc_id: String, dmg: float) -> void:
 	var nodes: Array = GameState.location_nodes.get(loc_id, [])
@@ -3479,6 +4166,11 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	MissionManager.add_progress("break_nodes", "", 1)
 	_ts_progress("break_nodes", 1, "")
 	_gain_xp(total_xp)
+	# Track lifetime stats (per-node)
+	GameState.lifetime_nodes_broken += 1
+	# Tutorial counters
+	if mat == "timber": GameState.timber_collected += total_drop
+	if mat == "sand":   GameState.sand_collected   += total_drop
 	# 15% chance: award a material blueprint fragment
 	if randf() < 0.15:
 		_award_blueprint_fragment(BlueprintDatabase.mat_drop_id(mat))
@@ -3491,17 +4183,23 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	if loc_id == GameState.active_location_id and node_idx < _node_visuals.size():
 		_node_visuals[node_idx]["container"].visible = false
 
-	# Check if all slots are cleared — if so, spawn the next wave
+	# Check if all slots are cleared — if so, count wave clear and spawn next wave
 	var all_clear := true
 	for slot: Dictionary in nodes:
 		if slot.get("node_id", "") != "":
 			all_clear = false
 			break
 	if all_clear:
+		# Increment unlock progress once per wave clear (not per node)
+		GameState.location_unlock_progress[loc_id] = \
+			GameState.location_unlock_progress.get(loc_id, 0) + 1
 		_spawn_wave(loc_id)
 
 	_update_hud()
 	_update_mine_mat_label()
+	_update_next_unlock_badge()
+	_update_chest_btn()
+	_check_intro_tasks()
 
 ## Spawn a fresh wave of nodes for a location with randomised HP.
 func _spawn_wave(loc_id: String) -> void:
@@ -3518,6 +4216,128 @@ func _spawn_wave(loc_id: String) -> void:
 			_node_visuals[i]["pos"] = Vector2(-1.0, -1.0)
 	if loc_id == GameState.active_location_id:
 		_refresh_mine_visuals(loc_id)
+	# Chest spawn: 12% chance per wave, only if no chest already pending
+	if GameState.pending_chests.get(loc_id, "") == "" and randf() < CHEST_SPAWN_CHANCE:
+		var chest_type := "vintage_chest" if randf() < 0.25 else "delivery_pallet"
+		GameState.pending_chests[loc_id] = chest_type
+		if loc_id == GameState.active_location_id:
+			_update_chest_btn()
+
+func _update_chest_btn() -> void:
+	var loc_id  := GameState.active_location_id
+	var pending : String = GameState.pending_chests.get(loc_id, "")
+	if pending == "":
+		_btn_chest.visible = false
+		return
+	_btn_chest.visible = true
+	if pending == "vintage_chest":
+		_btn_chest.text = "🎁  Vintage Chest"
+		_btn_chest.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+	else:
+		_btn_chest.text = "📦  Delivery Pallet"
+		_btn_chest.add_theme_color_override("font_color", Color(0.4, 0.85, 1.0))
+
+func _on_chest_open() -> void:
+	var loc_id  := GameState.active_location_id
+	var pending : String = GameState.pending_chests.get(loc_id, "")
+	if pending == "":
+		return
+	GameState.pending_chests.erase(loc_id)
+	_btn_chest.visible = false
+
+	if pending == "delivery_pallet":
+		_open_delivery_pallet()
+	else:
+		_open_vintage_chest()
+
+func _open_delivery_pallet() -> void:
+	# Award 1-3 random toolbox items
+	var all_items := ToolboxDatabase.get_all()
+	if all_items.is_empty():
+		return
+	var count     := randi_range(1, 3)
+	var rewarded: Array[String] = []
+	for _i in count:
+		var item: Dictionary = all_items[randi() % all_items.size()]
+		var item_id: String  = item.get("id", "")
+		GameState.inventory[item_id] = GameState.inventory.get(item_id, 0) + 1
+		rewarded.append(item.get("name", item_id))
+	GameState.delivery_pallets_opened += 1
+	_check_intro_tasks()
+	_show_chest_popup("📦 Delivery Pallet", rewarded, Color(0.4, 0.85, 1.0))
+
+func _open_vintage_chest() -> void:
+	var mod: Dictionary = ChestDatabase.roll_modifier()
+	GameState.chest_modifiers.append(mod)
+	GameState.vintage_chests_opened += 1
+	_check_intro_tasks()
+	var rarity_col := ChestDatabase.rarity_color(mod.get("rarity", "common"))
+	_show_chest_popup("🎁 Vintage Tool Chest", [mod.get("label", "Modifier")], rarity_col)
+
+func _show_chest_popup(title: String, reward_lines: Array[String], accent: Color) -> void:
+	if _chest_popup:
+		_chest_popup.queue_free()
+	_chest_popup        = CanvasLayer.new()
+	_chest_popup.layer  = 35
+	add_child(_chest_popup)
+
+	var dim      := ColorRect.new()
+	dim.color     = Color(0, 0, 0, 0.72)
+	dim.position  = Vector2.ZERO
+	dim.size      = Vector2(SCREEN_W, SCREEN_H)
+	_chest_popup.add_child(dim)
+
+	var card_w := 560
+	var card_h := 280 + reward_lines.size() * 36
+	var card   := ColorRect.new()
+	card.color   = C_PANEL
+	card.position = Vector2((SCREEN_W - card_w) / 2.0, (SCREEN_H - card_h) / 2.0)
+	card.size     = Vector2(card_w, card_h)
+	_chest_popup.add_child(card)
+
+	var top_bar      := ColorRect.new()
+	top_bar.color     = accent
+	top_bar.position  = card.position
+	top_bar.size      = Vector2(card_w, 4)
+	_chest_popup.add_child(top_bar)
+
+	var title_lbl           := Label.new()
+	title_lbl.text           = title
+	title_lbl.position       = Vector2(card.position.x + 16, card.position.y + 16)
+	title_lbl.size           = Vector2(card_w - 32, 40)
+	title_lbl.add_theme_font_size_override("font_size", 26)
+	title_lbl.add_theme_color_override("font_color", accent)
+	_chest_popup.add_child(title_lbl)
+
+	var sub_lbl           := Label.new()
+	sub_lbl.text           = "You received:"
+	sub_lbl.position       = Vector2(card.position.x + 16, card.position.y + 62)
+	sub_lbl.size           = Vector2(card_w - 32, 28)
+	sub_lbl.add_theme_font_size_override("font_size", 18)
+	sub_lbl.add_theme_color_override("font_color", C_DIM)
+	_chest_popup.add_child(sub_lbl)
+
+	for i in reward_lines.size():
+		var rl           := Label.new()
+		rl.text           = "• " + reward_lines[i]
+		rl.position       = Vector2(card.position.x + 24, card.position.y + 96 + i * 36)
+		rl.size           = Vector2(card_w - 48, 32)
+		rl.add_theme_font_size_override("font_size", 20)
+		rl.add_theme_color_override("font_color", accent)
+		_chest_popup.add_child(rl)
+
+	var close_y := card.position.y + card_h - 64
+	var close_btn      := Button.new()
+	close_btn.text      = "COLLECT"
+	close_btn.position  = Vector2(card.position.x + card_w / 2 - 100, close_y)
+	close_btn.size      = Vector2(200, 48)
+	close_btn.add_theme_font_size_override("font_size", 20)
+	close_btn.add_theme_color_override("font_color", accent)
+	close_btn.pressed.connect(func():
+		_chest_popup.queue_free()
+		_chest_popup = null
+	)
+	_chest_popup.add_child(close_btn)
 
 ## Returns a HP value in the range [base * 0.8, base * 1.2], rounded to int.
 func _random_node_hp(base_hp: float) -> float:
@@ -3550,6 +4370,7 @@ func _on_level_up() -> void:
 	GameState.skill_points += 1
 	_flash_feedback("LEVEL UP!  Lv.%d  (+1 SP)" % GameState.player_level)
 	_update_hud()
+	_check_intro_tasks()
 
 # ══════════════════════════════════════════════════════════════════════════
 # Worker tick
@@ -3669,8 +4490,7 @@ func _complete_stage() -> void:
 	if tier and new_idx >= tier.stages.size():
 		_complete_building()
 	else:
-		# Start 10-minute Site Prep cooldown between stages
-		GameState.current_building["stage_cooldown_until"] = Time.get_unix_time_from_system() + 600.0
+		# No cooldown between stages — cooldown only applies after the full building is done
 		_flash_feedback("Stage done!  +%s  +%d 💎" % [_fmt(reward), gem_reward])
 		_update_build_panel()
 		_update_hud()
@@ -3710,15 +4530,20 @@ func _complete_building() -> void:
 
 	var next_id := BuildDatabase.get_next_tier_id(tier_id)
 
+	# 10-minute Site Prep cooldown triggers on FULL building completion (not per stage)
+	var cooldown_end := Time.get_unix_time_from_system() + 600.0
+
 	if next_id == "":
 		# Max tier — loop on current
 		GameState.current_building = {
 			"tier_id": tier_id, "stage_index": 0,
-			"stage_progress": 0.0, "stage_started": false
+			"stage_progress": 0.0, "stage_started": false,
+			"stage_cooldown_until": cooldown_end,
 		}
 		_flash_feedback(base_msg + bonus_line)
 		_update_build_panel()
 		_update_hud()
+		_check_intro_tasks()
 		return
 
 	var next_tier := BuildDatabase.get_tier(next_id)
@@ -3728,7 +4553,8 @@ func _complete_building() -> void:
 	if next_tier and bp >= next_tier.build_power_required and permit_ok:
 		GameState.current_building = {
 			"tier_id": next_id, "stage_index": 0,
-			"stage_progress": 0.0, "stage_started": false
+			"stage_progress": 0.0, "stage_started": false,
+			"stage_cooldown_until": cooldown_end,
 		}
 		_flash_feedback(base_msg + bonus_line + "\nNow: %s" % next_tier.display_name)
 		_update_build_panel()
@@ -3736,11 +4562,13 @@ func _complete_building() -> void:
 	else:
 		GameState.current_building = {
 			"tier_id": tier_id, "stage_index": 0,
-			"stage_progress": 0.0, "stage_started": false
+			"stage_progress": 0.0, "stage_started": false,
+			"stage_cooldown_until": cooldown_end,
 		}
 		_flash_feedback(base_msg + bonus_line)
 		_update_build_panel()
 		_update_hud()
+		_check_intro_tasks()
 		_show_wall_panel(next_id)
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3762,6 +4590,7 @@ func _on_hire_pressed(id: String) -> void:
 	})
 	_update_crew_panel()
 	_update_hud()
+	_check_intro_tasks()
 
 func _on_levelup_pressed(id: String) -> void:
 	var member   := _crew_member_dict(id)
@@ -3868,7 +4697,7 @@ func _update_skyline_panel() -> void:
 		empty_lbl.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
 		empty_lbl.autowrap_mode           = TextServer.AUTOWRAP_WORD_SMART
 		empty_lbl.custom_minimum_size     = Vector2(SCREEN_W, 120)
-		empty_lbl.add_theme_font_size_override("font_size", 15)
+		empty_lbl.add_theme_font_size_override("font_size", 19)
 		empty_lbl.add_theme_color_override("font_color", C_DIM)
 		_skyline_list_box.add_child(empty_lbl)
 		return
@@ -3921,7 +4750,7 @@ func _update_skyline_panel() -> void:
 		name_lbl.text                      = name
 		name_lbl.position                  = Vector2(CARD_M + BAR_W + 10, 10)
 		name_lbl.size                      = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 16, 28)
-		name_lbl.add_theme_font_size_override("font_size", 17)
+		name_lbl.add_theme_font_size_override("font_size", 21)
 		name_lbl.add_theme_color_override("font_color", C_TEXT)
 		card.add_child(name_lbl)
 
@@ -3932,7 +4761,7 @@ func _update_skyline_panel() -> void:
 			ct_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_RIGHT
 			ct_lbl.position                  = Vector2(CARD_M + BAR_W + 10, 10)
 			ct_lbl.size                      = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 20, 28)
-			ct_lbl.add_theme_font_size_override("font_size", 17)
+			ct_lbl.add_theme_font_size_override("font_size", 21)
 			ct_lbl.add_theme_color_override("font_color", accent)
 			card.add_child(ct_lbl)
 
@@ -3943,7 +4772,7 @@ func _update_skyline_panel() -> void:
 			sub_lbl.text += "  •  +%s / min" % _fmt(total_income)
 		sub_lbl.position                   = Vector2(CARD_M + BAR_W + 10, 44)
 		sub_lbl.size                       = Vector2(400, 22)
-		sub_lbl.add_theme_font_size_override("font_size", 13)
+		sub_lbl.add_theme_font_size_override("font_size", 16)
 		sub_lbl.add_theme_color_override("font_color", C_DIM)
 		card.add_child(sub_lbl)
 
@@ -3954,7 +4783,7 @@ func _update_skyline_panel() -> void:
 			first_lbl.horizontal_alignment   = HORIZONTAL_ALIGNMENT_RIGHT
 			first_lbl.position               = Vector2(CARD_M + BAR_W + 10, 44)
 			first_lbl.size                   = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 20, 22)
-			first_lbl.add_theme_font_size_override("font_size", 13)
+			first_lbl.add_theme_font_size_override("font_size", 16)
 			first_lbl.add_theme_color_override("font_color", C_GOLD)
 			card.add_child(first_lbl)
 
@@ -3965,7 +4794,7 @@ func _update_skyline_panel() -> void:
 			prog_lbl.text                    = "🔨 Building now…"
 			prog_lbl.position                = Vector2(CARD_M + BAR_W + 10, 64)
 			prog_lbl.size                    = Vector2(400, 20)
-			prog_lbl.add_theme_font_size_override("font_size", 12)
+			prog_lbl.add_theme_font_size_override("font_size", 15)
 			prog_lbl.add_theme_color_override("font_color", C_ACCENT)
 			card.add_child(prog_lbl)
 
@@ -3986,7 +4815,7 @@ func _update_skyline_panel() -> void:
 		port_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_CENTER
 		port_lbl.autowrap_mode             = TextServer.AUTOWRAP_WORD_SMART
 		port_lbl.custom_minimum_size       = Vector2(SCREEN_W - 32, 44)
-		port_lbl.add_theme_font_size_override("font_size", 13)
+		port_lbl.add_theme_font_size_override("font_size", 16)
 		port_lbl.add_theme_color_override("font_color", C_DIM)
 		_skyline_list_box.add_child(port_lbl)
 
@@ -3999,9 +4828,12 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 	var yield_qty := 2 if randf() < GameState.get_double_craft_chance() else 1
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + yield_qty
 	MissionManager.add_progress("craft_items", "", yield_qty)
+	# Tutorial counters
+	if ref_id == "lumber": GameState.lumber_crafted += yield_qty
 	# 20% chance: award a refined blueprint fragment
 	if randf() < 0.20:
 		_award_blueprint_fragment(BlueprintDatabase.craft_drop_id(ref_id))
+	_check_intro_tasks()
 	_update_craft_panel()
 
 func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
@@ -4019,6 +4851,9 @@ func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
 	made += bonus_yield
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
 	MissionManager.add_progress("craft_items", "", made)
+	# Tutorial counters
+	if ref_id == "lumber": GameState.lumber_crafted += made
+	_check_intro_tasks()
 	_update_craft_panel()
 
 func _update_craft_panel() -> void:
@@ -4110,7 +4945,7 @@ func _build_missions_panel() -> void:
 	insp_sub.text = "Permanent challenges — earn Blueprint fragments & gems. Survive prestige."
 	insp_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	insp_sub.custom_minimum_size  = Vector2(SCREEN_W, 32)
-	insp_sub.add_theme_font_size_override("font_size", 11)
+	insp_sub.add_theme_font_size_override("font_size", 14)
 	insp_sub.add_theme_color_override("font_color", C_DIM)
 	vbox.add_child(insp_sub)
 
@@ -4139,7 +4974,7 @@ func _make_mission_section_header(parent: VBoxContainer, title: String, accent: 
 	title_lbl.text      = title
 	title_lbl.position  = Vector2(16, 8)
 	title_lbl.size      = Vector2(360, 40)
-	title_lbl.add_theme_font_size_override("font_size", 18)
+	title_lbl.add_theme_font_size_override("font_size", 22)
 	title_lbl.add_theme_color_override("font_color", accent)
 	hdr.add_child(title_lbl)
 
@@ -4148,7 +4983,7 @@ func _make_mission_section_header(parent: VBoxContainer, title: String, accent: 
 	countdown_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	countdown_lbl.position  = Vector2(0, 18)
 	countdown_lbl.size      = Vector2(SCREEN_W - 16, 24)
-	countdown_lbl.add_theme_font_size_override("font_size", 13)
+	countdown_lbl.add_theme_font_size_override("font_size", 16)
 	countdown_lbl.add_theme_color_override("font_color", C_DIM)
 	hdr.add_child(countdown_lbl)
 
@@ -4181,7 +5016,7 @@ func _make_mission_card(parent: VBoxContainer, is_daily: bool, slot_idx: int) ->
 	desc_lbl.position  = Vector2(18, 10)
 	desc_lbl.size      = Vector2(SCREEN_W - 200, 42)
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc_lbl.add_theme_font_size_override("font_size", 15)
+	desc_lbl.add_theme_font_size_override("font_size", 19)
 	desc_lbl.add_theme_color_override("font_color", C_TEXT)
 	card.add_child(desc_lbl)
 
@@ -4191,7 +5026,7 @@ func _make_mission_card(parent: VBoxContainer, is_daily: bool, slot_idx: int) ->
 	reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	reward_lbl.position  = Vector2(SCREEN_W - 210, 10)
 	reward_lbl.size      = Vector2(194, 30)
-	reward_lbl.add_theme_font_size_override("font_size", 14)
+	reward_lbl.add_theme_font_size_override("font_size", 18)
 	reward_lbl.add_theme_color_override("font_color", C_GOLD)
 	card.add_child(reward_lbl)
 
@@ -4214,7 +5049,7 @@ func _make_mission_card(parent: VBoxContainer, is_daily: bool, slot_idx: int) ->
 	prog_lbl.text      = "0 / 0"
 	prog_lbl.position  = Vector2(18, 73)
 	prog_lbl.size      = Vector2(SCREEN_W - 180, 22)
-	prog_lbl.add_theme_font_size_override("font_size", 12)
+	prog_lbl.add_theme_font_size_override("font_size", 15)
 	prog_lbl.add_theme_color_override("font_color", C_DIM)
 	card.add_child(prog_lbl)
 
@@ -4268,7 +5103,7 @@ func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionar
 		if BuildDatabase.get_tier(insp["tier_id"]) else insp["tier_id"]
 	tier_lbl.position = Vector2(16, 6)
 	tier_lbl.size     = Vector2(280, 20)
-	tier_lbl.add_theme_font_size_override("font_size", 11)
+	tier_lbl.add_theme_font_size_override("font_size", 14)
 	tier_lbl.add_theme_color_override("font_color", C_DIM)
 	card.add_child(tier_lbl)
 
@@ -4277,7 +5112,7 @@ func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionar
 	title_lbl.text     = insp.get("name", "")
 	title_lbl.position = Vector2(16, 24)
 	title_lbl.size     = Vector2(440, 26)
-	title_lbl.add_theme_font_size_override("font_size", 15)
+	title_lbl.add_theme_font_size_override("font_size", 19)
 	title_lbl.add_theme_color_override("font_color", C_GREEN if done else C_TEXT)
 	card.add_child(title_lbl)
 
@@ -4287,7 +5122,7 @@ func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionar
 	desc_lbl.position      = Vector2(16, 50)
 	desc_lbl.size          = Vector2(SCREEN_W - 220, 32)
 	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	desc_lbl.add_theme_font_size_override("font_size", 11)
+	desc_lbl.add_theme_font_size_override("font_size", 14)
 	desc_lbl.add_theme_color_override("font_color", C_DIM)
 	card.add_child(desc_lbl)
 
@@ -4299,7 +5134,7 @@ func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionar
 	reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	reward_lbl.position           = Vector2(SCREEN_W - 210, 6)
 	reward_lbl.size               = Vector2(194, 22)
-	reward_lbl.add_theme_font_size_override("font_size", 12)
+	reward_lbl.add_theme_font_size_override("font_size", 15)
 	reward_lbl.add_theme_color_override("font_color", C_GOLD if not done else C_DIM)
 	card.add_child(reward_lbl)
 
@@ -4309,7 +5144,7 @@ func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionar
 	done_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	done_lbl.position           = Vector2(SCREEN_W - 210, 56)
 	done_lbl.size               = Vector2(194, 26)
-	done_lbl.add_theme_font_size_override("font_size", 13)
+	done_lbl.add_theme_font_size_override("font_size", 16)
 	done_lbl.add_theme_color_override("font_color", C_GREEN)
 	card.add_child(done_lbl)
 
@@ -4441,14 +5276,14 @@ func _build_tradeshow_panel() -> void:
 	_lbl_ts_event_name = Label.new()
 	_lbl_ts_event_name.position = Vector2(16, 10)
 	_lbl_ts_event_name.size     = Vector2(SCREEN_W - 32, 32)
-	_lbl_ts_event_name.add_theme_font_size_override("font_size", 20)
+	_lbl_ts_event_name.add_theme_font_size_override("font_size", 25)
 	_lbl_ts_event_name.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	hdr_bg.add_child(_lbl_ts_event_name)
 
 	_lbl_ts_desc = Label.new()
 	_lbl_ts_desc.position      = Vector2(16, 44)
 	_lbl_ts_desc.size          = Vector2(SCREEN_W - 32, 28)
-	_lbl_ts_desc.add_theme_font_size_override("font_size", 13)
+	_lbl_ts_desc.add_theme_font_size_override("font_size", 16)
 	_lbl_ts_desc.add_theme_color_override("font_color", C_DIM)
 	hdr_bg.add_child(_lbl_ts_desc)
 
@@ -4456,7 +5291,7 @@ func _build_tradeshow_panel() -> void:
 	_lbl_ts_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_lbl_ts_timer.position             = Vector2(0, 68)
 	_lbl_ts_timer.size                 = Vector2(SCREEN_W - 16, 22)
-	_lbl_ts_timer.add_theme_font_size_override("font_size", 12)
+	_lbl_ts_timer.add_theme_font_size_override("font_size", 15)
 	_lbl_ts_timer.add_theme_color_override("font_color", C_DIM)
 	hdr_bg.add_child(_lbl_ts_timer)
 
@@ -4488,7 +5323,7 @@ func _ts_section_header(parent: VBoxContainer, title: String) -> Label:
 	lbl.text     = title
 	lbl.position = Vector2(16, 8)
 	lbl.size     = Vector2(SCREEN_W - 32, 26)
-	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_font_size_override("font_size", 18)
 	lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	hdr.add_child(lbl)
 	return lbl
@@ -4514,7 +5349,7 @@ func _build_ts_task_card(parent: VBoxContainer) -> Dictionary:
 	var desc_lbl     := Label.new()
 	desc_lbl.position = Vector2(18, 8)
 	desc_lbl.size     = Vector2(SCREEN_W - 36, 30)
-	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_font_size_override("font_size", 18)
 	desc_lbl.add_theme_color_override("font_color", C_TEXT)
 	card.add_child(desc_lbl)
 
@@ -4533,7 +5368,7 @@ func _build_ts_task_card(parent: VBoxContainer) -> Dictionary:
 	var prog_lbl     := Label.new()
 	prog_lbl.position = Vector2(18, 60)
 	prog_lbl.size     = Vector2(SCREEN_W - 200, 22)
-	prog_lbl.add_theme_font_size_override("font_size", 12)
+	prog_lbl.add_theme_font_size_override("font_size", 15)
 	prog_lbl.add_theme_color_override("font_color", C_DIM)
 	card.add_child(prog_lbl)
 
@@ -4542,7 +5377,7 @@ func _build_ts_task_card(parent: VBoxContainer) -> Dictionary:
 	done_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	done_lbl.position = Vector2(SCREEN_W - 178, 30)
 	done_lbl.size     = Vector2(162, 36)
-	done_lbl.add_theme_font_size_override("font_size", 14)
+	done_lbl.add_theme_font_size_override("font_size", 18)
 	done_lbl.add_theme_color_override("font_color", C_GREEN)
 	card.add_child(done_lbl)
 
@@ -4567,21 +5402,21 @@ func _build_ts_reward_card(parent: VBoxContainer, tier_idx: int) -> Dictionary:
 	tier_lbl.text     = "T%d" % (tier_idx + 1)
 	tier_lbl.position = Vector2(16, 22)
 	tier_lbl.size     = Vector2(40, 36)
-	tier_lbl.add_theme_font_size_override("font_size", 18)
+	tier_lbl.add_theme_font_size_override("font_size", 22)
 	tier_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
 	card.add_child(tier_lbl)
 
 	var label_lbl     := Label.new()
 	label_lbl.position = Vector2(62, 8)
 	label_lbl.size     = Vector2(360, 24)
-	label_lbl.add_theme_font_size_override("font_size", 13)
+	label_lbl.add_theme_font_size_override("font_size", 16)
 	label_lbl.add_theme_color_override("font_color", C_DIM)
 	card.add_child(label_lbl)
 
 	var reward_lbl     := Label.new()
 	reward_lbl.position = Vector2(62, 32)
 	reward_lbl.size     = Vector2(360, 28)
-	reward_lbl.add_theme_font_size_override("font_size", 16)
+	reward_lbl.add_theme_font_size_override("font_size", 20)
 	reward_lbl.add_theme_color_override("font_color", C_GEM)
 	card.add_child(reward_lbl)
 
@@ -4599,7 +5434,7 @@ func _build_ts_reward_card(parent: VBoxContainer, tier_idx: int) -> Dictionary:
 	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	status_lbl.position = Vector2(SCREEN_W - 170, 16)
 	status_lbl.size     = Vector2(154, 48)
-	status_lbl.add_theme_font_size_override("font_size", 14)
+	status_lbl.add_theme_font_size_override("font_size", 18)
 	status_lbl.add_theme_color_override("font_color", C_GREEN)
 	card.add_child(status_lbl)
 
@@ -4802,6 +5637,196 @@ func _on_menu_tradeshow() -> void:
 	_tradeshow_panel.visible = true
 
 # ══════════════════════════════════════════════════════════════════════════
+# Stats Panel
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_stats_panel() -> void:
+	const PW := 680
+	const PH := 960
+	const PX := (720 - PW) / 2
+	const PY := (1280 - PH) / 2
+
+	_stats_panel = CanvasLayer.new()
+	_stats_panel.layer = 22
+	_stats_panel.visible = false
+	add_child(_stats_panel)
+
+	var bg := ColorRect.new()
+	bg.color = Color(0, 0, 0, 0.75)
+	bg.size  = Vector2(720, 1280)
+	_stats_panel.add_child(bg)
+
+	var panel := ColorRect.new()
+	panel.color    = Color(0.12, 0.13, 0.15)
+	panel.position = Vector2(PX, PY)
+	panel.size     = Vector2(PW, PH)
+	_stats_panel.add_child(panel)
+
+	# Title bar
+	var title := Label.new()
+	title.text                          = "STATS"
+	title.position                      = Vector2(PX, PY + 10)
+	title.size                          = Vector2(PW - 60, 48)
+	title.horizontal_alignment          = HORIZONTAL_ALIGNMENT_CENTER
+	title.vertical_alignment            = VERTICAL_ALIGNMENT_CENTER
+	title.add_theme_font_size_override("font_size", 25)
+	title.add_theme_color_override("font_color", Color.WHITE)
+	_stats_panel.add_child(title)
+
+	# Close button
+	var close_btn := Button.new()
+	close_btn.text     = "✕"
+	close_btn.position = Vector2(PX + PW - 56, PY + 10)
+	close_btn.size     = Vector2(48, 48)
+	close_btn.add_theme_font_size_override("font_size", 20)
+	close_btn.pressed.connect(func(): _stats_panel.visible = false)
+	_stats_panel.add_child(close_btn)
+
+	# Scrollable content
+	var scroll := ScrollContainer.new()
+	scroll.position                         = Vector2(PX + 12, PY + 68)
+	scroll.size                             = Vector2(PW - 24, PH - 80)
+	scroll.horizontal_scroll_mode           = ScrollContainer.SCROLL_MODE_DISABLED
+	_stats_panel.add_child(scroll)
+
+	var vbox := VBoxContainer.new()
+	vbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vbox.add_theme_constant_override("separation", 6)
+	scroll.add_child(vbox)
+
+	# Helper to add a section header
+	var sections := [
+		["CAREER",          Color(1.0, 0.85, 0.3),  [
+			["contract_count",    "Contracts Completed"],
+			["total_buildings",   "Total Buildings Built"],
+			["reputation_points", "Reputation Points"],
+			["lifetime_nodes_broken", "Nodes Broken (All Time)"],
+			["inspections",       "Inspections Passed"],
+			["building_types",    "Building Types Unlocked"],
+		]],
+		["THIS CONTRACT",   Color(0.4, 0.85, 1.0),  [
+			["player_level",      "Player Level"],
+			["skyline",           "Buildings in Skyline"],
+			["locations_unlocked","Locations Unlocked"],
+			["nodes_this_contract","Waves Cleared"],
+			["crew",              "Crew Hired"],
+			["upgrades",          "Upgrades Purchased"],
+			["skill_nodes",       "Skill Nodes Bought"],
+		]],
+		["COLLECTION",      Color(0.6, 1.0, 0.6),   [
+			["gems",              "Gems"],
+			["blueprints_levelled","Blueprints Levelled"],
+			["permits",           "Permits Held"],
+			["artifacts",         "Artifacts Owned"],
+		]],
+	]
+
+	for sec in sections:
+		var sec_lbl := Label.new()
+		sec_lbl.text                     = sec[0] as String
+		sec_lbl.add_theme_font_size_override("font_size", 18)
+		sec_lbl.add_theme_color_override("font_color", sec[1] as Color)
+		sec_lbl.add_theme_constant_override("outline_size", 0)
+		vbox.add_child(sec_lbl)
+
+		var div := ColorRect.new()
+		div.color              = (sec[1] as Color) * Color(1,1,1,0.35)
+		div.custom_minimum_size = Vector2(PW - 24, 2)
+		vbox.add_child(div)
+
+		for row_def in (sec[2] as Array):
+			var row := HBoxContainer.new()
+			row.custom_minimum_size = Vector2(PW - 24, 36)
+			vbox.add_child(row)
+
+			var key_lbl := Label.new()
+			key_lbl.text                    = row_def[1] as String
+			key_lbl.size_flags_horizontal   = Control.SIZE_EXPAND_FILL
+			key_lbl.vertical_alignment      = VERTICAL_ALIGNMENT_CENTER
+			key_lbl.add_theme_font_size_override("font_size", 15)
+			key_lbl.add_theme_color_override("font_color", Color(0.75, 0.75, 0.75))
+			row.add_child(key_lbl)
+
+			var val_lbl := Label.new()
+			val_lbl.text                    = "-"
+			val_lbl.size_flags_horizontal   = Control.SIZE_SHRINK_END
+			val_lbl.vertical_alignment      = VERTICAL_ALIGNMENT_CENTER
+			val_lbl.horizontal_alignment    = HORIZONTAL_ALIGNMENT_RIGHT
+			val_lbl.custom_minimum_size     = Vector2(160, 36)
+			val_lbl.add_theme_font_size_override("font_size", 15)
+			val_lbl.add_theme_color_override("font_color", Color.WHITE)
+			row.add_child(val_lbl)
+
+			_stats_rows.append({"key": row_def[0] as String, "lbl": val_lbl})
+
+		# Spacer between sections
+		var spacer := Control.new()
+		spacer.custom_minimum_size = Vector2(0, 12)
+		vbox.add_child(spacer)
+
+func _update_stats_panel() -> void:
+	for entry: Dictionary in _stats_rows:
+		(entry["lbl"] as Label).text = _stats_value(entry["key"] as String)
+
+func _stats_value(key: String) -> String:
+	match key:
+		"contract_count":
+			return str(GameState.contract_count)
+		"total_buildings":
+			return str(GameState.portfolio.size())
+		"reputation_points":
+			return str(GameState.reputation_points)
+		"lifetime_nodes_broken":
+			return str(GameState.lifetime_nodes_broken)
+		"inspections":
+			return str(GameState.completed_inspections.size())
+		"building_types":
+			return str(GameState.first_completions.size())
+		"player_level":
+			return str(GameState.player_level)
+		"skyline":
+			return str(GameState.skyline.size())
+		"locations_unlocked":
+			var count := 0
+			var locs: Array = BuildDatabase.LOCATION_ORDER
+			for loc_id: String in locs:
+				if _is_location_unlocked(loc_id):
+					count += 1
+			return str(count) + " / " + str(locs.size())
+		"nodes_this_contract":
+			var total := 0
+			for loc_id: String in GameState.location_unlock_progress.keys():
+				total += int(GameState.location_unlock_progress[loc_id])
+			return str(total)
+		"crew":
+			return str(GameState.crew.size())
+		"upgrades":
+			var count := 0
+			for uid: String in GameState.upgrades.keys():
+				count += int(GameState.upgrades[uid])
+			return str(count)
+		"skill_nodes":
+			return str(GameState.skill_tree.size())
+		"gems":
+			return str(GameState.gems)
+		"blueprints_levelled":
+			var count := 0
+			for bp_id: String in GameState.blueprints.keys():
+				if int((GameState.blueprints[bp_id] as Dictionary).get("level", 0)) > 0:
+					count += 1
+			return str(count)
+		"permits":
+			return str(GameState.permits.size())
+		"artifacts":
+			return str(GameState.artifacts.size())
+	return "-"
+
+func _on_menu_stats() -> void:
+	_close_all_panels()
+	_update_stats_panel()
+	_stats_panel.visible = true
+
+# ══════════════════════════════════════════════════════════════════════════
 # Toolbox Panel
 # ══════════════════════════════════════════════════════════════════════════
 
@@ -4864,7 +5889,7 @@ func _build_toolbox_panel() -> void:
 	title.position  = Vector2(16, SHEET_Y + 6)
 	title.size      = Vector2(400, HEADER_H - 6)
 	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_font_size_override("font_size", 20)
 	title.add_theme_color_override("font_color", C_ORANGE)
 	_toolbox_panel.add_child(title)
 
@@ -4874,7 +5899,7 @@ func _build_toolbox_panel() -> void:
 	close_btn.text      = "✕"
 	close_btn.position  = Vector2(SCREEN_W - 56, SHEET_Y + 4)
 	close_btn.size      = Vector2(48, HEADER_H - 4)
-	close_btn.add_theme_font_size_override("font_size", 16)
+	close_btn.add_theme_font_size_override("font_size", 20)
 	close_btn.add_theme_color_override("font_color", C_DIM)
 	_toolbox_panel.add_child(close_btn)
 	close_btn.pressed.connect(func() -> void: _toolbox_panel.visible = false)
@@ -4916,7 +5941,7 @@ func _build_toolbox_panel() -> void:
 	_lbl_tb_item_name.text      = "Select an item"
 	_lbl_tb_item_name.position  = Vector2(16, DET_Y + 8)
 	_lbl_tb_item_name.size      = Vector2(SCREEN_W - 32, 28)
-	_lbl_tb_item_name.add_theme_font_size_override("font_size", 16)
+	_lbl_tb_item_name.add_theme_font_size_override("font_size", 20)
 	_lbl_tb_item_name.add_theme_color_override("font_color", Color.WHITE)
 	_toolbox_panel.add_child(_lbl_tb_item_name)
 
@@ -4925,7 +5950,7 @@ func _build_toolbox_panel() -> void:
 	_lbl_tb_item_desc.position  = Vector2(16, DET_Y + 38)
 	_lbl_tb_item_desc.size      = Vector2(SCREEN_W - 32, 36)
 	_lbl_tb_item_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_lbl_tb_item_desc.add_theme_font_size_override("font_size", 13)
+	_lbl_tb_item_desc.add_theme_font_size_override("font_size", 16)
 	_lbl_tb_item_desc.add_theme_color_override("font_color", C_DIM)
 	_toolbox_panel.add_child(_lbl_tb_item_desc)
 
@@ -4933,7 +5958,7 @@ func _build_toolbox_panel() -> void:
 	_lbl_tb_item_count.text      = ""
 	_lbl_tb_item_count.position  = Vector2(16, DET_Y + 76)
 	_lbl_tb_item_count.size      = Vector2(SCREEN_W - 32, 22)
-	_lbl_tb_item_count.add_theme_font_size_override("font_size", 13)
+	_lbl_tb_item_count.add_theme_font_size_override("font_size", 16)
 	_lbl_tb_item_count.add_theme_color_override("font_color", C_TEXT)
 	_toolbox_panel.add_child(_lbl_tb_item_count)
 
@@ -4941,7 +5966,7 @@ func _build_toolbox_panel() -> void:
 	_btn_tb_use.text     = "USE"
 	_btn_tb_use.position = Vector2(12, DET_Y + DETAIL_H - 58)
 	_btn_tb_use.size     = Vector2(336, 48)
-	_btn_tb_use.add_theme_font_size_override("font_size", 16)
+	_btn_tb_use.add_theme_font_size_override("font_size", 20)
 	_btn_tb_use.disabled = true
 	_toolbox_panel.add_child(_btn_tb_use)
 	_btn_tb_use.pressed.connect(_on_use_item)
@@ -4950,7 +5975,7 @@ func _build_toolbox_panel() -> void:
 	_btn_tb_buy.text     = "BUY  ◆1"
 	_btn_tb_buy.position = Vector2(360, DET_Y + DETAIL_H - 58)
 	_btn_tb_buy.size     = Vector2(348, 48)
-	_btn_tb_buy.add_theme_font_size_override("font_size", 16)
+	_btn_tb_buy.add_theme_font_size_override("font_size", 20)
 	_btn_tb_buy.disabled = true
 	_toolbox_panel.add_child(_btn_tb_buy)
 	_btn_tb_buy.pressed.connect(_on_buy_item)
@@ -4991,7 +6016,7 @@ func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
 	sym_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	sym_lbl.position  = Vector2(pos.x + 10, sy)
 	sym_lbl.size      = Vector2(SYM, SYM)
-	sym_lbl.add_theme_font_size_override("font_size", 18)
+	sym_lbl.add_theme_font_size_override("font_size", 22)
 	sym_lbl.add_theme_color_override("font_color", item_col)
 	parent.add_child(sym_lbl)
 
@@ -5000,7 +6025,7 @@ func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
 	name_lbl.text      = item.get("name", "")
 	name_lbl.position  = pos + Vector2(56, 12)
 	name_lbl.size      = Vector2(w - 66, 26)
-	name_lbl.add_theme_font_size_override("font_size", 12)
+	name_lbl.add_theme_font_size_override("font_size", 15)
 	name_lbl.add_theme_color_override("font_color", C_TEXT)
 	parent.add_child(name_lbl)
 
@@ -5009,7 +6034,7 @@ func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
 	cost_lbl.text      = "◆%d" % item.get("gem_cost", 1)
 	cost_lbl.position  = pos + Vector2(56, 40)
 	cost_lbl.size      = Vector2(w - 66, 20)
-	cost_lbl.add_theme_font_size_override("font_size", 12)
+	cost_lbl.add_theme_font_size_override("font_size", 15)
 	cost_lbl.add_theme_color_override("font_color", C_GEM)
 	parent.add_child(cost_lbl)
 
@@ -5025,7 +6050,7 @@ func _make_toolbox_cell(parent: Node, item: Dictionary, _idx: int,
 	count_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	count_lbl.position  = pos + Vector2(w - 36, h - 24)
 	count_lbl.size      = Vector2(32, 20)
-	count_lbl.add_theme_font_size_override("font_size", 12)
+	count_lbl.add_theme_font_size_override("font_size", 15)
 	count_lbl.add_theme_color_override("font_color", C_GOLD)
 	parent.add_child(count_lbl)
 
@@ -5105,6 +6130,7 @@ func _on_use_item() -> void:
 	if item.is_empty(): return
 
 	GameState.inventory[_toolbox_selected] = owned - 1
+	GameState.toolbox_items_used += 1
 
 	var effect   : String = item.get("effect", "")
 	var duration : int    = int(item.get("duration", 0))
@@ -5129,6 +6155,7 @@ func _on_use_item() -> void:
 		_update_boost_strip()
 		_flash_feedback("%s active for %ds!" % [item.get("name", ""), duration])
 
+	_check_intro_tasks()
 	_update_toolbox_panel()
 	_update_hud()
 
@@ -5192,7 +6219,7 @@ func _build_toolbox_float_btn() -> void:
 	lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 	lbl.position  = Vector2(BTN_X, BTN_Y)
 	lbl.size      = Vector2(BTN_W, BTN_H)
-	lbl.add_theme_font_size_override("font_size", 24)
+	lbl.add_theme_font_size_override("font_size", 30)
 	lbl.add_theme_color_override("font_color", Color.WHITE)
 	_toolbox_float_cl.add_child(lbl)
 
@@ -5202,7 +6229,7 @@ func _build_toolbox_float_btn() -> void:
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	sub.position  = Vector2(BTN_X - MARGIN, BTN_Y + BTN_H + 2)
 	sub.size      = Vector2(BTN_W + MARGIN * 2, 18)
-	sub.add_theme_font_size_override("font_size", 10)
+	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", Color(0.90, 0.60, 0.30))
 	_toolbox_float_cl.add_child(sub)
 
@@ -5273,7 +6300,7 @@ func _update_boost_strip() -> void:
 		chip_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
 		chip_lbl.position  = Vector2.ZERO
 		chip_lbl.size      = Vector2(72, 20)
-		chip_lbl.add_theme_font_size_override("font_size", 12)
+		chip_lbl.add_theme_font_size_override("font_size", 15)
 		chip_lbl.add_theme_color_override("font_color", chip_color)
 		chip.add_child(chip_lbl)
 
@@ -5326,7 +6353,13 @@ func _update_mine_screen() -> void:
 	# Location bar
 	_lbl_active_loc.text = loc_data.get("display_name", loc_id)
 	_lbl_active_loc.add_theme_color_override("font_color", accent)
-	_loc_bar_accent.color = accent
+	# Update the left accent stripe on the compact location badge
+	# _loc_bar_accent is the badge background; the stripe is its next sibling.
+	# We tint the background slightly with the accent instead.
+	_loc_bar_accent.color = Color(accent.r * 0.15, accent.g * 0.15, accent.b * 0.15, 0.92)
+
+	# Next-unlock badge
+	_update_next_unlock_badge()
 
 	# Fast path: just update HP bars (shapes don't change per tick)
 	_update_mine_hps(loc_id)
@@ -5337,914 +6370,26 @@ func _update_mine_screen() -> void:
 	var wrate := _worker_damage_rate(loc_id)
 	_lbl_mine_rate.text = "Mine Power: %d  ·  Workers: %.1f HP/s" % [mp, wrate]
 
-## Updates only the material count label — cheap, safe to call after every node break.
-func _update_mine_mat_label() -> void:
-	var loc_data := BuildDatabase.get_location(GameState.active_location_id)
-	var mat: String = loc_data.get("material", "timber")
-	_lbl_mat_count.text = "%s: %s" % [mat.capitalize(), _fmt(GameState.materials.get(mat, 0))]
-	_lbl_mat_count.add_theme_color_override("font_color", _mat_color(mat))
+	# Chest button
+	_update_chest_btn()
 
-func _update_build_panel() -> void:
-	var tier := BuildDatabase.get_tier(GameState.current_building.get("tier_id", "shed"))
-	var idx:  int = int(GameState.current_building.get("stage_index", 0))
-	var stage     := BuildDatabase.get_current_stage()
-	var started:  bool = GameState.current_building.get("stage_started", false)
-	var progress: float = float(GameState.current_building.get("stage_progress", 0.0))
-
-	# Stage header label
-	if tier and stage:
-		_lbl_build_stage.text = "%s   Stage %d / %d\n%s" \
-			% [tier.display_name, idx + 1, tier.stages.size(), stage.display_name]
-	elif tier:
-		_lbl_build_stage.text = "%s — All stages complete!" % tier.display_name
-	else:
-		_lbl_build_stage.text = ""
-
-	# Building sprite (atlas for houses, hidden for shed)
-	var art := _get_stage_texture(
-		GameState.current_building.get("tier_id", "shed"), idx)
-	if art:
-		_building_sprite.texture = art
-		_building_sprite.visible = true
-	else:
-		_building_sprite.visible = false
-
-	# Build Power stat
-	_lbl_build_bp.text = "Build Power: %d" % GameState.get_build_power()
-
-	# Property income rate — always visible when build panel open
-	if _lbl_property_income:
-		var income_rate := GameState.get_property_income_rate()
-		if income_rate > 0.0:
-			_lbl_property_income.text = "🏘 Property income: %s / min" % _fmt(int(income_rate))
-		else:
-			_lbl_property_income.text = "🏘 Build your skyline to earn passive income"
-
-	# Check whether a site prep cooldown is still active
-	var cooldown_until := float(GameState.current_building.get("stage_cooldown_until", 0.0))
-	var in_cooldown    := not started and Time.get_unix_time_from_system() < cooldown_until
-
-	if started:
-		# Progress view
-		_build_reqs_box.visible           = false
-		_btn_start_stage.visible          = false
-		_lbl_cant_start.visible           = false
-		_lbl_build_cooldown.visible       = false
-		_build_prog_bg.visible            = true
-		_build_prog_fill.visible          = true
-		_lbl_build_pct.visible            = true
-		_btn_tap_build.visible            = true
-		# Show the two sibling nodes (tap bg + accent bar) that are children of the panel
-		if _build_panel.get_node_or_null("TapBuildBg"):
-			_build_panel.get_node("TapBuildBg").visible   = true
-		if _build_panel.get_node_or_null("TapBuildBar"):
-			_build_panel.get_node("TapBuildBar").visible  = true
-
-		var prog_w := float(SCREEN_W - 40) * progress
-		_build_prog_fill.size.x = prog_w
-		_lbl_build_pct.text     = "%d%%" % int(progress * 100)
-	else:
-		# Requirements view
-		_build_reqs_box.visible  = true
-		_build_prog_bg.visible   = false
-		_build_prog_fill.visible = false
-		_lbl_build_pct.visible   = false
-		_btn_tap_build.visible   = false
-		if _build_panel.get_node_or_null("TapBuildBg"):
-			_build_panel.get_node("TapBuildBg").visible  = false
-		if _build_panel.get_node_or_null("TapBuildBar"):
-			_build_panel.get_node("TapBuildBar").visible = false
-
-		# Cooldown display — hides the start button while site prep is active
-		if in_cooldown:
-			_lbl_build_cooldown.visible = true
-			_refresh_build_cooldown_label()
-			_btn_start_stage.visible    = false
-			_lbl_cant_start.visible     = false
-		else:
-			_lbl_build_cooldown.visible = false
-
-		# Rebuild requirement rows
-		for child in _build_reqs_box.get_children():
-			child.queue_free()
-
-		if stage:
-			var can_afford := true
-			for mat: String in stage.required_materials:
-				var need: int = int(stage.required_materials[mat])
-				var have: int = GameState.materials.get(mat, 0)
-				if have < need:
-					can_afford = false
-				var accent := _mat_color(mat)
-
-				var row_lbl     := Label.new()
-				var tick        := " ✓" if have >= need else ""
-				row_lbl.text     = "%s: %s / %s%s" % [mat.capitalize(), _fmt(have), _fmt(need), tick]
-				row_lbl.custom_minimum_size = Vector2(SCREEN_W - 40, 36)
-				row_lbl.add_theme_color_override("font_color", C_GREEN if have >= need else accent)
-				_build_reqs_box.add_child(row_lbl)
-
-				var bar_bg     := ColorRect.new()
-				bar_bg.color    = Color(0.10, 0.10, 0.16)
-				bar_bg.custom_minimum_size = Vector2(SCREEN_W - 40, 12)
-				_build_reqs_box.add_child(bar_bg)
-
-				var bar_fill     := ColorRect.new()
-				bar_fill.color    = accent.darkened(0.15)
-				var pct           := minf(float(have) / float(need), 1.0)
-				bar_fill.custom_minimum_size = Vector2((SCREEN_W - 40) * pct, 12)
-				_build_reqs_box.add_child(bar_fill)
-
-				# Spacer
-				var spacer     := Control.new()
-				spacer.custom_minimum_size = Vector2(0, 8)
-				_build_reqs_box.add_child(spacer)
-
-			if not in_cooldown:
-				_btn_start_stage.visible  = can_afford
-				_lbl_cant_start.visible   = not can_afford
-
-				# Check build power gate
-				if can_afford and tier:
-					var bp       := GameState.get_build_power()
-					var required := tier.build_power_required
-					if bp < required:
-						_btn_start_stage.visible = false
-						_lbl_cant_start.visible  = true
-						_lbl_cant_start.text     = ("Build Power too low: need %d, have %d" \
-							% [required, bp])
-					else:
-						_lbl_cant_start.text = "Not enough materials."
-		else:
-			if not in_cooldown:
-				_btn_start_stage.visible = false
-				_lbl_cant_start.visible  = false
-
-# ══════════════════════════════════════════════════════════════════════════
-# Helpers
-# ══════════════════════════════════════════════════════════════════════════
-
-func _fmt(n: int) -> String:
-	if n >= 1_000_000_000:
-		return "%.1fB" % (float(n) / 1_000_000_000.0)
-	elif n >= 1_000_000:
-		return "%.1fM" % (float(n) / 1_000_000.0)
-	elif n >= 10_000:
-		return "%.1fK" % (float(n) / 1_000.0)
-	return "%d" % n
-
-func _mat_color(mat_id: String) -> Color:
-	match mat_id:
-		"timber":     return C_TIMBER
-		"stone":      return C_STONE
-		"sand":       return C_SAND
-		"steel_ore":  return C_STEEL_ORE
-		"clay":       return C_CLAY
-		"copper_ore": return C_COPPER_ORE
-		"limestone":  return C_LIMESTONE
-		"bauxite":    return C_BAUXITE
-		"lumber":     return C_LUMBER
-		"concrete":   return C_CONCRETE
-		"glass":      return C_GLASS
-		"steel_beam": return C_STEEL_BEAM
-		"copper_pipe":return C_COPPER_PIPE
-		_:            return C_TEXT
-
-func _tier_colour(tier_id: String) -> Color:
-	match tier_id:
-		"shed":            return Color(0.55, 0.45, 0.28)
-		"single_house":    return Color(0.35, 0.55, 0.70)
-		"two_story_house": return Color(0.50, 0.35, 0.70)
-		_:                 return Color(0.50, 0.50, 0.50)
-
-func _get_stage_texture(tier_id: String, stage_idx: int) -> AtlasTexture:
-	match tier_id:
-		"single_house":    return _atlas_region(stage_idx, 0)
-		"two_story_house": return _atlas_region(stage_idx, 1)
-	return null
-
-func _atlas_region(col: int, row: int) -> AtlasTexture:
-	if not _house_sheet_tex:
-		_house_sheet_tex = load(_HOUSE_SHEET_PATH) as Texture2D
-	if not _house_sheet_tex:
-		return null
-	var atlas        := AtlasTexture.new()
-	atlas.atlas       = _house_sheet_tex
-	atlas.filter_clip = true
-	var w := 284 if col == 4 else _CELL_W
-	atlas.region = Rect2(col * _CELL_W, row * _CELL_H, w, _CELL_H)
-	return atlas
-
-func _is_hired(id: String) -> bool:
-	return not _crew_member_dict(id).is_empty()
-
-func _crew_member_dict(id: String) -> Dictionary:
-	for m: Dictionary in GameState.crew:
-		if m.get("id", "") == id:
-			return m
-	return {}
-
-func _crew_template(id: String) -> CrewMemberResource:
-	for t in BuildDatabase.get_hireable_crew():
-		if t.id == id:
-			return t
-	return null
-
-func _flash_feedback(msg: String) -> void:
-	if _feedback_tween:
-		_feedback_tween.kill()
-	_lbl_feedback.text = msg
-	_feedback_tween    = create_tween()
-	_feedback_tween.tween_property(_lbl_feedback, "modulate:a", 1.0, 0.06)
-	_feedback_tween.tween_interval(1.5)
-	_feedback_tween.tween_property(_lbl_feedback, "modulate:a", 0.0, 0.5)
-
-func _flash_build_feedback(msg: String) -> void:
-	if not _lbl_build_feedback:
+## Updates the next-unlock badge — cheap, safe to call after every node break.
+func _update_next_unlock_badge() -> void:
+	var loc_id    := GameState.active_location_id
+	var loc_order: Array = BuildDatabase.LOCATION_ORDER
+	var loc_idx   := loc_order.find(loc_id)
+	if loc_idx < 0 or loc_idx >= loc_order.size() - 1:
+		_next_unlock_widget.visible = false
 		return
-	var tw := create_tween()
-	_lbl_build_feedback.text = msg
-	tw.tween_property(_lbl_build_feedback, "modulate:a", 1.0, 0.05)
-	tw.tween_interval(0.6)
-	tw.tween_property(_lbl_build_feedback, "modulate:a", 0.0, 0.3)
-
-## Accumulates passive property income and awards it as whole-cash chunks.
-func _tick_property_income(delta: float) -> void:
-	var rate := GameState.get_property_income_rate()
-	if rate <= 0.0:
-		return
-	_property_income_accum += rate / 60.0 * delta
-	if _property_income_accum >= 1.0:
-		var earned := int(_property_income_accum)
-		GameState.cash          += earned
-		_property_income_accum  -= float(earned)
-		_update_hud()
-
-## Updates the Site Prep cooldown label with MM:SS remaining. Called every second.
-func _refresh_build_cooldown_label() -> void:
-	if not _lbl_build_cooldown:
-		return
-	var cooldown_until := float(GameState.current_building.get("stage_cooldown_until", 0.0))
-	var remaining      := cooldown_until - Time.get_unix_time_from_system()
-	if remaining <= 0.0:
-		# Cooldown just expired — refresh full panel to reveal the start button
-		_lbl_build_cooldown.visible = false
-		_update_build_panel()
-		return
-	var mins := int(remaining) / 60
-	var secs := int(remaining) % 60
-	_lbl_build_cooldown.text = "🔨 Site Prep — %d:%02d remaining" % [mins, secs]
-
-
-# ── Offline gains summary ──────────────────────────────────────────────────
-func _build_offline_popup() -> void:
-	_offline_popup        = CanvasLayer.new()
-	_offline_popup.layer  = 45
-	_offline_popup.visible = false
-	add_child(_offline_popup)
-
-	# Dark dim
-	var dim := ColorRect.new()
-	dim.color    = Color(0.0, 0.0, 0.0, 0.82)
-	dim.position = Vector2.ZERO
-	dim.size     = Vector2(SCREEN_W, SCREEN_H)
-	_offline_popup.add_child(dim)
-
-	# Panel card
-	const CARD_W := 600
-	const CARD_H := 560
-	const CARD_X := int((SCREEN_W - CARD_W) / 2.0)
-	const CARD_Y := int((SCREEN_H - CARD_H) / 2.0)
-
-	var card_bg := ColorRect.new()
-	card_bg.color    = Color(0.08, 0.09, 0.13, 0.98)
-	card_bg.position = Vector2(CARD_X, CARD_Y)
-	card_bg.size     = Vector2(CARD_W, CARD_H)
-	_offline_popup.add_child(card_bg)
-
-	# Bolt-texture overlay on card
-	var pt := load(PANEL_TEX_PATH) as Texture2D
-	if pt:
-		var np := NinePatchRect.new()
-		np.texture             = pt
-		np.position            = Vector2(CARD_X, CARD_Y)
-		np.size                = Vector2(CARD_W, CARD_H)
-		np.patch_margin_left   = 16
-		np.patch_margin_right  = 16
-		np.patch_margin_top    = 16
-		np.patch_margin_bottom = 16
-		np.modulate            = Color(0.80, 0.85, 0.90, 0.30)
-		_offline_popup.add_child(np)
-
-	# Gold top strip
-	var strip := ColorRect.new()
-	strip.color    = C_GOLD
-	strip.position = Vector2(CARD_X, CARD_Y)
-	strip.size     = Vector2(CARD_W, 4)
-	_offline_popup.add_child(strip)
-
-	# Header
-	var hdr := Label.new()
-	hdr.text                    = "WELCOME BACK"
-	hdr.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
-	hdr.position                = Vector2(CARD_X, CARD_Y + 12)
-	hdr.size                    = Vector2(CARD_W, 50)
-	hdr.add_theme_font_size_override("font_size", 26)
-	hdr.add_theme_color_override("font_color", C_GOLD)
-	_offline_popup.add_child(hdr)
-
-	# Separator under header
-	var sep := ColorRect.new()
-	sep.color    = C_GOLD.darkened(0.4)
-	sep.position = Vector2(CARD_X, CARD_Y + 64)
-	sep.size     = Vector2(CARD_W, 2)
-	_offline_popup.add_child(sep)
-
-	# Time-away label
-	_lbl_offline_time                    = Label.new()
-	_lbl_offline_time.text               = ""
-	_lbl_offline_time.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_lbl_offline_time.position           = Vector2(CARD_X, CARD_Y + 74)
-	_lbl_offline_time.size               = Vector2(CARD_W, 34)
-	_lbl_offline_time.add_theme_font_size_override("font_size", 15)
-	_lbl_offline_time.add_theme_color_override("font_color", Color(0.65, 0.68, 0.80))
-	_offline_popup.add_child(_lbl_offline_time)
-
-	# "MATERIALS COLLECTED" sub-header
-	var sub := Label.new()
-	sub.text                    = "MATERIALS COLLECTED"
-	sub.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
-	sub.position                = Vector2(CARD_X, CARD_Y + 116)
-	sub.size                    = Vector2(CARD_W, 28)
-	sub.add_theme_font_size_override("font_size", 13)
-	sub.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
-	_offline_popup.add_child(sub)
-
-	# Rows container
-	_offline_rows_box                   = VBoxContainer.new()
-	_offline_rows_box.position          = Vector2(CARD_X + 36, CARD_Y + 150)
-	_offline_rows_box.size              = Vector2(CARD_W - 72, 310)
-	_offline_rows_box.add_theme_constant_override("separation", 8)
-	_offline_popup.add_child(_offline_rows_box)
-
-	# COLLECT button
-	var btn      := Button.new()
-	btn.text      = "COLLECT"
-	btn.flat      = false
-	btn.position  = Vector2(CARD_X + int((CARD_W - 240) / 2.0), CARD_Y + CARD_H - 76)
-	btn.size      = Vector2(240, 54)
-	btn.add_theme_font_size_override("font_size", 18)
-	btn.add_theme_color_override("font_color", Color(0.04, 0.04, 0.06))
-	var bs := StyleBoxFlat.new()
-	bs.bg_color                   = C_GOLD
-	bs.corner_radius_top_left     = 6
-	bs.corner_radius_top_right    = 6
-	bs.corner_radius_bottom_left  = 6
-	bs.corner_radius_bottom_right = 6
-	btn.add_theme_stylebox_override("normal", bs)
-	var bs_h := bs.duplicate() as StyleBoxFlat
-	bs_h.bg_color = C_GOLD.lightened(0.2)
-	btn.add_theme_stylebox_override("hover", bs_h)
-	btn.pressed.connect(_on_offline_collect)
-	_offline_popup.add_child(btn)
-
-
-func _show_offline_popup(summary: Dictionary) -> void:
-	# Clear old rows
-	for ch in _offline_rows_box.get_children():
-		ch.queue_free()
-
-	# Time string
-	var secs  := int(summary.elapsed)
-	var hours := int(secs / 3600.0)
-	var mins  := int((secs % 3600) / 60.0)
-	if hours > 0:
-		_lbl_offline_time.text = "You were away for %dh %dm" % [hours, mins]
-	else:
-		_lbl_offline_time.text = "You were away for %d minutes" % mins
-
-	# Material accent colour map
-	var mat_cols := {
-		"timber":     C_TIMBER,
-		"stone":      C_STONE,
-		"lumber":     C_LUMBER,
-		"concrete":   C_CONCRETE,
-		"sand":       C_SAND,
-		"steel_ore":  C_STEEL_ORE,
-		"glass":      C_GLASS,
-		"steel_beam": C_STEEL_BEAM,
-	}
-
-	for mat: String in summary.gains:
-		var amount := int(summary.gains[mat])
-		var col: Color = mat_cols.get(mat, C_GOLD)
-
-		var row := HBoxContainer.new()
-		row.custom_minimum_size = Vector2(0, 42)
-
-		# Colour swatch
-		var swatch := ColorRect.new()
-		swatch.color               = col
-		swatch.custom_minimum_size = Vector2(6, 36)
-		row.add_child(swatch)
-
-		# Gap
-		var gap := Control.new()
-		gap.custom_minimum_size = Vector2(12, 0)
-		row.add_child(gap)
-
-		# Material name
-		var name_lbl := Label.new()
-		name_lbl.text                  = mat.replace("_", " ").capitalize()
-		name_lbl.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		name_lbl.vertical_alignment    = VERTICAL_ALIGNMENT_CENTER
-		name_lbl.add_theme_font_size_override("font_size", 16)
-		name_lbl.add_theme_color_override("font_color", Color.WHITE)
-		row.add_child(name_lbl)
-
-		# Amount
-		var amt_lbl := Label.new()
-		amt_lbl.text                 = "+%d" % amount
-		amt_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		amt_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		amt_lbl.add_theme_font_size_override("font_size", 16)
-		amt_lbl.add_theme_color_override("font_color", col)
-		row.add_child(amt_lbl)
-
-		_offline_rows_box.add_child(row)
-
-	_offline_popup.visible = true
-
-
-func _on_offline_collect() -> void:
-	_offline_popup.visible = false
-	OfflineProgressCalculator.clear_offline_summary()
-	_update_display()
-
-
-func _check_offline_summary() -> void:
-	var summary := OfflineProgressCalculator.get_offline_summary()
-	if summary.gains.is_empty():
-		return
-	_show_offline_popup(summary)
-
-# ══════════════════════════════════════════════════════════════════════════
-# Blueprints & Permits panel
-# ══════════════════════════════════════════════════════════════════════════
-
-func _build_blueprints_panel() -> void:
-	_blueprints_panel         = CanvasLayer.new()
-	_blueprints_panel.name    = "BlueprintsPanel"
-	_blueprints_panel.layer   = 22
-	_blueprints_panel.visible = false
-	add_child(_blueprints_panel)
-
-	# Panel background
-	var bg      := ColorRect.new()
-	bg.color     = C_PANEL
-	bg.position  = Vector2.ZERO
-	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
-	_blueprints_panel.add_child(bg)
-
-	var close_btn := _build_panel_header(_blueprints_panel, "BLUEPRINTS & PERMITS", Color(0.40, 0.85, 1.00))
-	close_btn.pressed.connect(func() -> void: _blueprints_panel.visible = false)
-
-	# ScrollContainer below header (header is 78px high)
-	const HDR_H := 80
-	var scroll      := ScrollContainer.new()
-	scroll.position  = Vector2(0, HDR_H)
-	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - HDR_H)
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_blueprints_panel.add_child(scroll)
-
-	_bp_scroll_content                                = VBoxContainer.new()
-	_bp_scroll_content.custom_minimum_size            = Vector2(SCREEN_W, 0)
-	_bp_scroll_content.add_theme_constant_override("separation", 0)
-	scroll.add_child(_bp_scroll_content)
-
-## Rebuilds all blueprint + permit cards inside the scroll content.
-func _update_blueprints_panel() -> void:
-	if not _bp_scroll_content:
-		return
-	for ch in _bp_scroll_content.get_children():
-		_bp_scroll_content.remove_child(ch)
-		ch.queue_free()
-
-	const CATEGORIES: Array = [
-		["raw",      "RAW MATERIALS",     Color(0.95, 0.72, 0.30)],
-		["refined",  "REFINED MATERIALS", Color(0.55, 0.88, 0.95)],
-		["building", "BUILDINGS",         Color(0.70, 0.50, 1.00)],
-		["general",  "GENERAL",           Color(0.40, 0.90, 0.60)],
-	]
-
-	for cat_info in CATEGORIES:
-		var cat_id   : String = cat_info[0]
-		var cat_name : String = cat_info[1]
-		var cat_col  : Color  = cat_info[2]
-
-		var cat_bps := BlueprintDatabase.get_all_by_category(cat_id)
-		if cat_bps.is_empty():
-			continue
-
-		# Category header strip
-		var hdr_bg      := ColorRect.new()
-		hdr_bg.color     = cat_col.darkened(0.72)
-		hdr_bg.custom_minimum_size = Vector2(SCREEN_W, 36)
-		_bp_scroll_content.add_child(hdr_bg)
-
-		var hdr_lbl      := Label.new()
-		hdr_lbl.text      = "  " + cat_name
-		hdr_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		hdr_lbl.position  = Vector2.ZERO
-		hdr_lbl.size      = Vector2(SCREEN_W, 36)
-		hdr_lbl.add_theme_font_size_override("font_size", 13)
-		hdr_lbl.add_theme_color_override("font_color", cat_col)
-		hdr_bg.add_child(hdr_lbl)
-
-		# Grid: 2 columns
-		var grid       := GridContainer.new()
-		grid.columns    = 2
-		grid.add_theme_constant_override("h_separation", 2)
-		grid.add_theme_constant_override("v_separation", 2)
-		_bp_scroll_content.add_child(grid)
-
-		for bp: Dictionary in cat_bps:
-			var bp_id   : String = bp.get("id", "")
-			var entry   : Dictionary = GameState.blueprints.get(bp_id, {})
-			var lvl     : int    = int(entry.get("level", 0))
-			var frags   : int    = int(entry.get("fragments", 0))
-			var next_need: int   = BlueprintDatabase.fragments_for_next_level(lvl)
-			var bp_col  : Color  = bp.get("color", cat_col)
-			var symbol  : String = bp.get("symbol", "?")
-			var bp_name : String = bp.get("name", "")
-			var bonus_pct: int   = int(BlueprintDatabase.total_bonus(lvl) * 100.0)
-
-			# Card container
-			var card      := ColorRect.new()
-			card.color     = C_CARD
-			card.custom_minimum_size = Vector2(359, 88)
-			grid.add_child(card)
-
-			# Accent left strip
-			var accent_bar      := ColorRect.new()
-			accent_bar.color     = bp_col
-			accent_bar.position  = Vector2(0, 0)
-			accent_bar.size      = Vector2(4, 88)
-			card.add_child(accent_bar)
-
-			# Symbol square
-			var sym_bg      := ColorRect.new()
-			sym_bg.color     = bp_col.darkened(0.55)
-			sym_bg.position  = Vector2(8, 12)
-			sym_bg.size      = Vector2(44, 44)
-			card.add_child(sym_bg)
-
-			var sym_lbl      := Label.new()
-			sym_lbl.text      = symbol
-			sym_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-			sym_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-			sym_lbl.position  = Vector2(8, 12)
-			sym_lbl.size      = Vector2(44, 44)
-			sym_lbl.add_theme_font_size_override("font_size", 13)
-			sym_lbl.add_theme_color_override("font_color", bp_col)
-			card.add_child(sym_lbl)
-
-			# Blueprint name
-			var name_lbl      := Label.new()
-			name_lbl.text      = bp_name.replace(" Blueprint", "")
-			name_lbl.position  = Vector2(58, 8)
-			name_lbl.size      = Vector2(230, 24)
-			name_lbl.add_theme_font_size_override("font_size", 13)
-			name_lbl.add_theme_color_override("font_color", Color.WHITE)
-			card.add_child(name_lbl)
-
-			# Bonus label
-			var bonus_lbl      := Label.new()
-			bonus_lbl.text      = "+%d%% bonus" % bonus_pct if lvl > 0 else "No bonus yet"
-			bonus_lbl.position  = Vector2(58, 30)
-			bonus_lbl.size      = Vector2(230, 22)
-			bonus_lbl.add_theme_font_size_override("font_size", 11)
-			bonus_lbl.add_theme_color_override("font_color", bp_col if lvl > 0 else Color(0.40, 0.42, 0.55))
-			card.add_child(bonus_lbl)
-
-			# Level dots (5 dots across bottom-left area)
-			for di in BlueprintDatabase.MAX_LEVEL:
-				var dot      := ColorRect.new()
-				dot.color     = bp_col if di < lvl else Color(0.20, 0.22, 0.30)
-				dot.position  = Vector2(58 + di * 18, 56)
-				dot.size      = Vector2(14, 14)
-				card.add_child(dot)
-
-			# Fragment bar + label
-			if lvl < BlueprintDatabase.MAX_LEVEL:
-				var frag_bg      := ColorRect.new()
-				frag_bg.color     = Color(0.12, 0.13, 0.18)
-				frag_bg.position  = Vector2(8, 74)
-				frag_bg.size      = Vector2(343, 8)
-				card.add_child(frag_bg)
-
-				var frag_pct := float(frags) / float(next_need) if next_need > 0 else 1.0
-				var frag_fill     := ColorRect.new()
-				frag_fill.color    = bp_col
-				frag_fill.position = Vector2(8, 74)
-				frag_fill.size     = Vector2(int(343.0 * frag_pct), 8)
-				card.add_child(frag_fill)
-
-				var frag_lbl      := Label.new()
-				frag_lbl.text      = "%d / %d frags" % [frags, next_need]
-				frag_lbl.position  = Vector2(160, 56)
-				frag_lbl.size      = Vector2(190, 16)
-				frag_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-				frag_lbl.add_theme_font_size_override("font_size", 11)
-				frag_lbl.add_theme_color_override("font_color", Color(0.45, 0.48, 0.60))
-				card.add_child(frag_lbl)
-			else:
-				var max_lbl      := Label.new()
-				max_lbl.text      = "MAX LEVEL"
-				max_lbl.position  = Vector2(58, 70)
-				max_lbl.size      = Vector2(290, 16)
-				max_lbl.add_theme_font_size_override("font_size", 11)
-				max_lbl.add_theme_color_override("font_color", C_GOLD)
-				card.add_child(max_lbl)
-
-	# ── Permits section ────────────────────────────────────────────────────
-	var perm_hdr_bg      := ColorRect.new()
-	perm_hdr_bg.color     = Color(0.12, 0.10, 0.20)
-	perm_hdr_bg.custom_minimum_size = Vector2(SCREEN_W, 36)
-	_bp_scroll_content.add_child(perm_hdr_bg)
-
-	var perm_hdr_lbl      := Label.new()
-	perm_hdr_lbl.text      = "  PERMITS"
-	perm_hdr_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-	perm_hdr_lbl.position  = Vector2.ZERO
-	perm_hdr_lbl.size      = Vector2(SCREEN_W, 36)
-	perm_hdr_lbl.add_theme_font_size_override("font_size", 13)
-	perm_hdr_lbl.add_theme_color_override("font_color", Color(0.70, 0.50, 1.00))
-	perm_hdr_bg.add_child(perm_hdr_lbl)
-
-	for permit: Dictionary in BlueprintDatabase.PERMITS:
-		var pid       : String = permit.get("id", "")
-		var pname     : String = permit.get("name", "")
-		var pdesc     : String = permit.get("desc", "")
-		var req_tier  : String = permit.get("unlock_tier", "")
-		var req_count : int    = int(permit.get("completions_required", 3))
-		var pcolor    : Color  = permit.get("color", Color.WHITE)
-		var earned    : bool   = GameState.has_permit(pid)
-
-		# Count how many times the player has completed req_tier
-		var completions := 0
-		for t: String in GameState.skyline:
-			if t == req_tier:
-				completions += 1
-
-		var pcard      := ColorRect.new()
-		pcard.color     = C_CARD
-		pcard.custom_minimum_size = Vector2(SCREEN_W - 16, 96)
-		_bp_scroll_content.add_child(pcard)
-
-		# Side accent
-		var paccent      := ColorRect.new()
-		paccent.color     = pcolor if earned else C_BORDER
-		paccent.position  = Vector2(0, 0)
-		paccent.size      = Vector2(4, 96)
-		pcard.add_child(paccent)
-
-		# Name
-		var pname_lbl      := Label.new()
-		pname_lbl.text      = pname
-		pname_lbl.position  = Vector2(12, 8)
-		pname_lbl.size      = Vector2(560, 28)
-		pname_lbl.add_theme_font_size_override("font_size", 15)
-		pname_lbl.add_theme_color_override("font_color", pcolor if earned else Color(0.45, 0.48, 0.60))
-		pcard.add_child(pname_lbl)
-
-		# Description
-		var pdesc_lbl      := Label.new()
-		pdesc_lbl.text      = pdesc
-		pdesc_lbl.position  = Vector2(12, 34)
-		pdesc_lbl.size      = Vector2(560, 22)
-		pdesc_lbl.add_theme_font_size_override("font_size", 12)
-		pdesc_lbl.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
-		pcard.add_child(pdesc_lbl)
-
-		# Status badge
-		var status_lbl      := Label.new()
-		status_lbl.text      = "✓ EARNED" if earned else "LOCKED"
-		status_lbl.position  = Vector2(SCREEN_W - 120, 8)
-		status_lbl.size      = Vector2(100, 28)
-		status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-		status_lbl.add_theme_font_size_override("font_size", 13)
-		status_lbl.add_theme_color_override("font_color", C_GOLD if earned else Color(0.40, 0.42, 0.55))
-		pcard.add_child(status_lbl)
-
-		# Completion progress bar
-		var req_tier_name := req_tier.replace("_", " ").capitalize()
-		var prog_lbl      := Label.new()
-		prog_lbl.text      = "%s completions: %d / %d" % [req_tier_name, mini(completions, req_count), req_count]
-		prog_lbl.position  = Vector2(12, 56)
-		prog_lbl.size      = Vector2(560, 18)
-		prog_lbl.add_theme_font_size_override("font_size", 11)
-		prog_lbl.add_theme_color_override("font_color", Color(0.45, 0.48, 0.60))
-		pcard.add_child(prog_lbl)
-
-		var bar_bg      := ColorRect.new()
-		bar_bg.color     = Color(0.12, 0.13, 0.18)
-		bar_bg.position  = Vector2(12, 76)
-		bar_bg.size      = Vector2(SCREEN_W - 36, 8)
-		pcard.add_child(bar_bg)
-
-		var bar_pct := minf(float(completions) / float(req_count), 1.0)
-		var bar_fill     := ColorRect.new()
-		bar_fill.color    = pcolor if earned else pcolor.darkened(0.4)
-		bar_fill.position = Vector2(12, 76)
-		bar_fill.size     = Vector2(int(float(SCREEN_W - 36) * bar_pct), 8)
-		pcard.add_child(bar_fill)
-
-	# Bottom padding
-	var pad      := Control.new()
-	pad.custom_minimum_size = Vector2(SCREEN_W, 24)
-	_bp_scroll_content.add_child(pad)
-
-## Award one blueprint fragment, level up if threshold reached, then save.
-func _award_blueprint_fragment(bp_id: String) -> void:
-	var bp := BlueprintDatabase.get_blueprint(bp_id)
-	if bp.is_empty():
-		return
-
-	if not GameState.blueprints.has(bp_id):
-		GameState.blueprints[bp_id] = {"level": 0, "fragments": 0}
-
-	var entry: Dictionary = GameState.blueprints[bp_id]
-	var lvl: int          = int(entry.get("level", 0))
-
-	if lvl >= BlueprintDatabase.MAX_LEVEL:
-		return   # already maxed
-
-	entry["fragments"] = int(entry.get("fragments", 0)) + 1
-	var threshold: int  = BlueprintDatabase.fragments_for_next_level(lvl)
-
-	# Short display name: strip " Blueprint" suffix
-	var short_name: String = bp.get("name", bp_id).replace(" Blueprint", "")
-
-	if entry["fragments"] >= threshold:
-		entry["fragments"] = 0
-		entry["level"]     = lvl + 1
-		GameState.blueprints[bp_id] = entry
-		_show_fragment_popup(short_name, bp.get("color", Color.WHITE),
-			"LEVEL UP!", "Now Lv %d  (+%d%% bonus)" % [entry["level"],
-			int(BlueprintDatabase.total_bonus(entry["level"]) * 100.0)])
-	else:
-		GameState.blueprints[bp_id] = entry
-		_show_fragment_popup(short_name, bp.get("color", Color.WHITE),
-			"Fragment found",
-			"%d / %d toward Lv %d" % [entry["fragments"], threshold, lvl + 1])
-
-## Silently awards `count` blueprint fragments without showing a fragment popup.
-## Handles level-ups automatically. Used by inspection reward logic.
-func _grant_blueprint_fragments(bp_id: String, count: int) -> void:
-	var bp := BlueprintDatabase.get_blueprint(bp_id)
-	if bp.is_empty():
-		return
-	if not GameState.blueprints.has(bp_id):
-		GameState.blueprints[bp_id] = {"level": 0, "fragments": 0}
-	var entry: Dictionary = GameState.blueprints[bp_id]
-	entry["fragments"] = int(entry.get("fragments", 0)) + count
-	# Level up as many times as the fragment total allows
-	while true:
-		var lvl: int = int(entry.get("level", 0))
-		if lvl >= BlueprintDatabase.MAX_LEVEL:
-			entry["fragments"] = 0
-			break
-		var threshold: int = BlueprintDatabase.fragments_for_next_level(lvl)
-		if int(entry["fragments"]) < threshold:
-			break
-		entry["fragments"] -= threshold
-		entry["level"] = lvl + 1
-	GameState.blueprints[bp_id] = entry
-
-## Checks all inspections for `tier_id` and awards rewards for any newly passed ones.
-## Called at the end of _complete_building(), before current_building is reset.
-func _check_inspections(tier_id: String) -> void:
-	var now     := Time.get_unix_time_from_system()
-	var started := float(GameState.current_building.get("build_started_at", now))
-	var elapsed_min := (now - started) / 60.0
-	var gem_skips   := int(GameState.current_building.get("gem_skips_used", 0))
-
-	var passed_any := false
-	for insp: Dictionary in InspectionDatabase.get_for_tier(tier_id):
-		var iid: String = insp["id"]
-		if GameState.completed_inspections.has(iid):
-			continue   # already earned — permanent
-		var passed := false
-		match insp.get("condition_type", ""):
-			"no_skip": passed = gem_skips == 0
-			"speed":   passed = elapsed_min <= float(insp.get("condition_value", 9999))
-		if not passed:
-			continue
-		GameState.completed_inspections.append(iid)
-		var frags: int = int(insp.get("reward_fragments", 0))
-		var gems: int  = int(insp.get("reward_gems", 0))
-		var bp_id := BlueprintDatabase.building_drop_id(tier_id)
-		_grant_blueprint_fragments(bp_id, frags)
-		GameState.gems += gems
-		_flash_feedback("✅ Inspection Passed: %s\n+%d fragments  +%d 💎" \
-			% [insp.get("name", ""), frags, gems])
-		passed_any = true
-	if passed_any:
-		_update_hud()
-		if _missions_panel and _missions_panel.visible:
-			_update_inspections_section()
-
-## Shows a small toast-style popup near the top of the mine area.
-## Auto-dismisses after ~2.5 s.
-func _show_fragment_popup(title: String, accent: Color, header: String, sub: String) -> void:
-	# Remove any existing popup node so they don't stack
-	var old := get_node_or_null("FragmentPopup")
-	if old:
-		old.queue_free()
-
-	const POP_W  := 380
-	const POP_H  := 76
-	const POP_X  := int((SCREEN_W - POP_W) / 2.0)
-	const POP_Y  := MINE_Y + 24   # just below the location bar
-
-	var cl      := CanvasLayer.new()
-	cl.name      = "FragmentPopup"
-	cl.layer     = 35   # above panels, below prestige confirm
-	add_child(cl)
-
-	# Card background
-	var bg      := ColorRect.new()
-	bg.color     = Color(0.08, 0.09, 0.14, 0.96)
-	bg.position  = Vector2(POP_X, POP_Y)
-	bg.size      = Vector2(POP_W, POP_H)
-	cl.add_child(bg)
-
-	# Accent top strip in the blueprint's colour
-	var strip      := ColorRect.new()
-	strip.color     = accent
-	strip.position  = Vector2(POP_X, POP_Y)
-	strip.size      = Vector2(POP_W, 3)
-	cl.add_child(strip)
-
-	# Left colour swatch
-	var swatch      := ColorRect.new()
-	swatch.color     = accent
-	swatch.position  = Vector2(POP_X, POP_Y + 3)
-	swatch.size      = Vector2(4, POP_H - 3)
-	cl.add_child(swatch)
-
-	# Blueprint name (top-left, in accent colour)
-	var name_lbl      := Label.new()
-	name_lbl.text      = title
-	name_lbl.position  = Vector2(POP_X + 12, POP_Y + 6)
-	name_lbl.size      = Vector2(POP_W - 16, 22)
-	name_lbl.add_theme_font_size_override("font_size", 13)
-	name_lbl.add_theme_color_override("font_color", accent)
-	cl.add_child(name_lbl)
-
-	# Header (e.g. "Fragment found" or "LEVEL UP!")
-	var hdr_lbl      := Label.new()
-	hdr_lbl.text      = header
-	hdr_lbl.position  = Vector2(POP_X + 12, POP_Y + 26)
-	hdr_lbl.size      = Vector2(POP_W - 16, 22)
-	hdr_lbl.add_theme_font_size_override("font_size", 14)
-	hdr_lbl.add_theme_color_override("font_color", Color.WHITE)
-	cl.add_child(hdr_lbl)
-
-	# Sub text (e.g. "2 / 3 toward Lv 1")
-	var sub_lbl      := Label.new()
-	sub_lbl.text      = sub
-	sub_lbl.position  = Vector2(POP_X + 12, POP_Y + 48)
-	sub_lbl.size      = Vector2(POP_W - 16, 20)
-	sub_lbl.add_theme_font_size_override("font_size", 12)
-	sub_lbl.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
-	cl.add_child(sub_lbl)
-
-	# Slide in from top + fade out after 2.5 s
-	cl.offset      = Vector2(0, -POP_H - 10)
-	var tw := create_tween()
-	tw.tween_property(cl, "offset", Vector2.ZERO, 0.18).set_ease(Tween.EASE_OUT)
-	tw.tween_interval(2.2)
-	tw.tween_property(cl, "offset", Vector2(0, -POP_H - 10), 0.25).set_ease(Tween.EASE_IN)
-	tw.tween_callback(cl.queue_free)
-
-## Check all permits and award any that have newly been earned.
-func _check_permit_awards() -> void:
-	for permit: Dictionary in BlueprintDatabase.PERMITS:
-		var pid      : String = permit.get("id", "")
-		if GameState.has_permit(pid):
-			continue   # already earned
-
-		var req_tier  : String = permit.get("unlock_tier", "")
-		var req_count : int    = int(permit.get("completions_required", 3))
-
-		var completions := 0
-		for t: String in GameState.skyline:
-			if t == req_tier:
-				completions += 1
-
-		if completions >= req_count:
-			GameState.permits.append(pid)
-			var pname: String = permit.get("name", pid)
-			_flash_feedback("Permit earned!\n%s" % pname)
+	var next_id: String   = loc_order[loc_idx + 1]
+	var next_data         := BuildDatabase.get_location(next_id)
+	var threshold: int    = BuildDatabase.LOCATION_UNLOCK_NODES[loc_idx]
+	var progress: int     = int(GameState.location_unlock_progress.get(loc_id, 0))
+	var accent            := _mat_color(BuildDatabase.get_location(loc_id).get("material", "timber"))
+	_lbl_nu_progress.text = "%d / %d" % [progress, threshold]
+	_lbl_nu_name.text     = "→ " + next_data.get("display_name", next_id)
+	var pct := clampf(float(progress) / float(threshold), 0.0, 1.0)
+	_nu_prog_bg.color = accent.lerp(Color(0.2, 0.9, 0.4), pct) * Color(1,1,1,0.3)
+	_lbl_nu_progress.add_theme_color_override("font_color", accent.lerp(Color(0.3, 1.0, 0.5), pct))
+	(_next_unlock_widget.get_node("TopBar") as ColorRect).color = accent
+	

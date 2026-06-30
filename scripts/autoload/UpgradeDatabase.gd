@@ -20,7 +20,7 @@ extends Node
 const UPGRADES: Array[Dictionary] = [
 	{
 		"id":           "sharper_tools",
-		"name":         "Sharper Tools",
+		"name":         "Upgrade Tools",
 		"description":  "+10% Mine Power per level",
 		"max_level":    5,
 		"unlock_level": 1,

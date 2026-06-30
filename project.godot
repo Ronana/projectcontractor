@@ -29,6 +29,7 @@ BlueprintDatabase="*res://scripts/autoload/BlueprintDatabase.gd"
 SkillDatabase="*res://scripts/autoload/SkillDatabase.gd"
 InspectionDatabase="*res://scripts/autoload/InspectionDatabase.gd"
 TradeShowDatabase="*res://scripts/autoload/TradeShowDatabase.gd"
+ChestDatabase="*res://scripts/autoload/ChestDatabase.gd"
 
 [display]
 

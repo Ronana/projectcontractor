@@ -39,10 +39,24 @@ const TIER_ORDER: Array[String] = [
 	"high_rise", "skyscraper",
 ]
 
-## All mining locations (picker shows all from level 1).
+## All mining locations in unlock order.
 const LOCATION_ORDER: Array[String] = [
 	"lumber_yard", "stone_quarry", "sand_pit", "steel_yard",
 	"clay_pit", "copper_mine", "limestone_quarry", "bauxite_mine",
+]
+
+## Wave clears required at location[i] to unlock location[i+1].
+## A "clear" = all nodes on screen destroyed in one wave.
+## Index matches LOCATION_ORDER. Last entry unused (no next location).
+const LOCATION_UNLOCK_NODES: Array[int] = [
+	30,   # lumber_yard   → stone_quarry
+	78,   # stone_quarry  → sand_pit
+	126,  # sand_pit      → steel_yard
+	174,  # steel_yard    → clay_pit
+	222,  # clay_pit      → copper_mine
+	270,  # copper_mine   → limestone_quarry
+	318,  # limestone_quarry → bauxite_mine
+	0,    # bauxite_mine  (last — no next)
 ]
 
 var _tiers: Dictionary = {}

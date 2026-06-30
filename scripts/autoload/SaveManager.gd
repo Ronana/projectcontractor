@@ -39,8 +39,9 @@ func save_game() -> void:
 		"player_level":          GameState.player_level,
 		"player_xp":             GameState.player_xp,
 		"active_location_id":    GameState.active_location_id,
-		"location_nodes":        GameState.location_nodes,
-			"active_node_count":      GameState.active_node_count,
+		"location_nodes":             GameState.location_nodes,
+		"active_node_count":          GameState.active_node_count,
+		"location_unlock_progress":   GameState.location_unlock_progress,
 		"upgrades":              GameState.upgrades,
 		# -- Permanent (survive New Contract reset) --
 		"reputation_points":     GameState.reputation_points,
@@ -65,11 +66,33 @@ func save_game() -> void:
 		"first_completions":     GameState.first_completions,
 		# -- Site Inspections (permanent) --
 		"completed_inspections": GameState.completed_inspections,
+		# -- Lifetime stats (permanent) --
+		"lifetime_nodes_broken": GameState.lifetime_nodes_broken,
 		# -- Trade Shows --
 		"trade_show_state":      GameState.trade_show_state,
 		# -- Skill tree --
 		"skill_points":          GameState.skill_points,
 		"skill_tree":            GameState.skill_tree,
+		# -- Intro tasks (permanent) --
+		"intro_task_index":      GameState.intro_task_index,
+		"intro_strip_visible":   GameState.intro_strip_visible,
+		# -- Tutorial progress counters (permanent) --
+		"timber_collected":      GameState.timber_collected,
+		"sand_collected":        GameState.sand_collected,
+		"lumber_crafted":        GameState.lumber_crafted,
+		"materials_sold":        GameState.materials_sold,
+		"visited_stone_quarry":  GameState.visited_stone_quarry,
+		"visited_sand_pit":      GameState.visited_sand_pit,
+		"blasting_caps_fired":           GameState.blasting_caps_fired,
+		"blasting_cap_cooldown_until":   GameState.blasting_cap_cooldown_until,
+		# -- Chest system (permanent modifiers) --
+		"chest_modifiers":               GameState.chest_modifiers,
+		"pending_chests":                GameState.pending_chests,
+		"toolbox_items_used":    GameState.toolbox_items_used,
+		"delivery_pallets_opened": GameState.delivery_pallets_opened,
+		"vintage_chests_opened": GameState.vintage_chests_opened,
+		# -- Consent (permanent) --
+		"privacy_agreed":        GameState.privacy_agreed,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -145,6 +168,8 @@ func load_game() -> void:
 	GameState.first_completions      = d.get("first_completions", [])
 	# -- Site Inspections (permanent) --
 	GameState.completed_inspections  = d.get("completed_inspections", [])
+	# -- Lifetime stats (permanent) --
+	GameState.lifetime_nodes_broken  = int(d.get("lifetime_nodes_broken", 0))
 	# -- Trade Shows --
 	GameState.trade_show_state       = d.get("trade_show_state", {
 		"event_index": 0, "expires_at": 0.0,
@@ -153,6 +178,26 @@ func load_game() -> void:
 	# -- Skill tree --
 	GameState.skill_points           = int(d.get("skill_points", 0))
 	GameState.skill_tree             = d.get("skill_tree", {})
+	# -- Intro tasks (permanent) --
+	GameState.intro_task_index       = int(d.get("intro_task_index", 0))
+	GameState.intro_strip_visible    = bool(d.get("intro_strip_visible", true))
+	# -- Tutorial progress counters (permanent) --
+	GameState.timber_collected       = int(d.get("timber_collected", 0))
+	GameState.sand_collected         = int(d.get("sand_collected", 0))
+	GameState.lumber_crafted         = int(d.get("lumber_crafted", 0))
+	GameState.materials_sold         = int(d.get("materials_sold", 0))
+	GameState.visited_stone_quarry   = int(d.get("visited_stone_quarry", 0))
+	GameState.visited_sand_pit       = int(d.get("visited_sand_pit", 0))
+	GameState.blasting_caps_fired            = int(d.get("blasting_caps_fired", 0))
+	GameState.blasting_cap_cooldown_until    = float(d.get("blasting_cap_cooldown_until", 0.0))
+	# -- Chest system --
+	GameState.chest_modifiers                = d.get("chest_modifiers", [])
+	GameState.pending_chests                 = d.get("pending_chests", {})
+	GameState.toolbox_items_used     = int(d.get("toolbox_items_used", 0))
+	GameState.delivery_pallets_opened = int(d.get("delivery_pallets_opened", 0))
+	GameState.vintage_chests_opened  = int(d.get("vintage_chests_opened", 0))
+	# -- Consent (permanent) --
+	GameState.privacy_agreed         = bool(d.get("privacy_agreed", false))
 
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
@@ -160,7 +205,8 @@ func load_game() -> void:
 			var mat: String = member.get("material_type", "timber")
 			member["location_id"] = "stone_quarry" if mat == "stone" else "lumber_yard"
 
-	GameState.active_node_count = int(d.get("active_node_count", 1))
+	GameState.active_node_count          = int(d.get("active_node_count", 1))
+	GameState.location_unlock_progress   = d.get("location_unlock_progress", {})
 
 	# Load location_nodes; migrate old single-dict format → array; fill missing from defaults
 	var saved_nodes: Dictionary = d.get("location_nodes", {})
@@ -192,9 +238,10 @@ func _init_fresh_state() -> void:
 	GameState.skyline              = []
 	GameState.player_level         = 1
 	GameState.player_xp            = 0.0
-	GameState.active_location_id   = "lumber_yard"
-	GameState.active_node_count    = 1
-	GameState.location_nodes       = BuildDatabase.get_default_location_nodes()
+	GameState.active_location_id         = "lumber_yard"
+	GameState.active_node_count          = 1
+	GameState.location_nodes             = BuildDatabase.get_default_location_nodes()
+	GameState.location_unlock_progress   = {}
 	GameState.upgrades             = {}
 	GameState.reputation_points    = 0
 	GameState.contract_count       = 0
@@ -208,12 +255,29 @@ func _init_fresh_state() -> void:
 	GameState.permits              = []
 	GameState.first_completions      = []
 	GameState.completed_inspections  = []
+	GameState.lifetime_nodes_broken  = 0
 	GameState.trade_show_state       = {
 		"event_index": 0, "expires_at": 0.0,
 		"task_progress": {}, "claimed_rewards": [0, 0, 0],
 	}
 	GameState.skill_points           = 0
 	GameState.skill_tree             = {}
+	GameState.intro_task_index       = 0
+	GameState.intro_strip_visible    = true
+	GameState.timber_collected       = 0
+	GameState.sand_collected         = 0
+	GameState.lumber_crafted         = 0
+	GameState.materials_sold         = 0
+	GameState.visited_stone_quarry   = 0
+	GameState.visited_sand_pit       = 0
+	GameState.blasting_caps_fired            = 0
+	GameState.blasting_cap_cooldown_until    = 0.0
+	GameState.chest_modifiers                = []
+	GameState.pending_chests                 = {}
+	GameState.toolbox_items_used     = 0
+	GameState.delivery_pallets_opened = 0
+	GameState.vintage_chests_opened  = 0
+	GameState.privacy_agreed         = false
 
 ## Reset all temporary state for a New Contract (prestige).
 ## rep_earned is added to the permanent reputation_points total.
@@ -233,8 +297,9 @@ func prestige_reset(rep_earned: int) -> void:
 	GameState.skyline            = []
 	GameState.player_level       = 1
 	GameState.player_xp          = 0.0
-	GameState.active_location_id = "lumber_yard"
-	GameState.location_nodes     = BuildDatabase.get_default_location_nodes()
+	GameState.active_location_id         = "lumber_yard"
+	GameState.location_nodes             = BuildDatabase.get_default_location_nodes()
+	GameState.location_unlock_progress   = {}
 	GameState.upgrades           = {}
 	GameState.skill_points       = 0
 	GameState.skill_tree         = {}
