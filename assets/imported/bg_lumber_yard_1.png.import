@@ -2,16 +2,16 @@
 
 importer="texture"
 type="CompressedTexture2D"
-uid="uid://crtowalyfb48p"
-path="res://.godot/imported/bg_lumber_yard.png-f16909ac9a64ca2e7a527908dd7fe427.ctex"
+uid="uid://c318k37hn8rut"
+path="res://.godot/imported/bg_lumber_yard_1.png-5effc830cd490e3f73218cfaa1177713.ctex"
 metadata={
 "vram_texture": false
 }
 
 [deps]
 
-source_file="res://assets/imported/bg_lumber_yard.png"
-dest_files=["res://.godot/imported/bg_lumber_yard.png-f16909ac9a64ca2e7a527908dd7fe427.ctex"]
+source_file="res://assets/imported/bg_lumber_yard_1.png"
+dest_files=["res://.godot/imported/bg_lumber_yard_1.png-5effc830cd490e3f73218cfaa1177713.ctex"]
 
 [params]
 

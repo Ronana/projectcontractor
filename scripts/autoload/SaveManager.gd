@@ -58,6 +58,11 @@ func save_game() -> void:
 		# -- Toolbox --
 		"inventory":             GameState.inventory,
 		"active_boosts":         GameState.active_boosts,
+		# -- Blueprints & Permits --
+		"blueprints":            GameState.blueprints,
+		"permits":               GameState.permits,
+		# -- First completions (permanent) --
+		"first_completions":     GameState.first_completions,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -126,6 +131,12 @@ func load_game() -> void:
 	GameState.inventory           = d.get("inventory",     {})
 	GameState.active_boosts       = d.get("active_boosts", {})
 
+	# -- Blueprints & Permits --
+	GameState.blueprints          = d.get("blueprints", {})
+	GameState.permits             = d.get("permits",    [])
+	# -- First completions (permanent) --
+	GameState.first_completions   = d.get("first_completions", [])
+
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
 		if not member.has("location_id") or member["location_id"] == "":
@@ -176,6 +187,9 @@ func _init_fresh_state() -> void:
 	GameState.pinned_shortcuts     = ["build", "crew", "craft", "sell"]
 	GameState.inventory            = {}
 	GameState.active_boosts        = {}
+	GameState.blueprints           = {}
+	GameState.permits              = []
+	GameState.first_completions    = []
 
 ## Reset all temporary state for a New Contract (prestige).
 ## rep_earned is added to the permanent reputation_points total.

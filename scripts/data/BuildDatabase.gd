@@ -4,6 +4,34 @@ extends Node
 ##
 ## Autoload order: can live anywhere after GameState.
 
+## Tiers that require a permit before the player can select them.
+## Key: tier_id → permit_id the player must hold.
+const TIER_PERMIT_REQUIRED: Dictionary = {
+	"apartment_block": "commercial_permit",
+	"retail_unit":     "commercial_permit",
+	"office_block":    "engineering_permit",
+	"high_rise":       "high_rise_permit",
+	"skyscraper":      "landmark_permit",
+}
+
+## Per-tier reward tables and property income rates.
+## stage_cash_base : base cash per stage (stage_order multiplier applied in code)
+## stage_gems      : gems awarded per stage completion
+## complete_cash   : cash bonus when the full building is finished
+## complete_gems   : gems bonus when the full building is finished
+## first_gems      : one-time gem bonus on the very first completion of this tier
+## income_per_min  : passive cash/min this tier contributes once in the skyline
+const TIER_REWARDS: Dictionary = {
+	"shed":            {"stage_cash_base": 100,   "stage_gems": 1,  "complete_cash": 500,     "complete_gems": 8,    "first_gems": 15,   "income_per_min": 2   },
+	"single_house":    {"stage_cash_base": 300,   "stage_gems": 2,  "complete_cash": 2000,    "complete_gems": 20,   "first_gems": 30,   "income_per_min": 8   },
+	"two_story_house": {"stage_cash_base": 800,   "stage_gems": 3,  "complete_cash": 5000,    "complete_gems": 40,   "first_gems": 60,   "income_per_min": 20  },
+	"apartment_block": {"stage_cash_base": 2000,  "stage_gems": 5,  "complete_cash": 15000,   "complete_gems": 80,   "first_gems": 120,  "income_per_min": 60  },
+	"retail_unit":     {"stage_cash_base": 5000,  "stage_gems": 8,  "complete_cash": 40000,   "complete_gems": 150,  "first_gems": 250,  "income_per_min": 150 },
+	"office_block":    {"stage_cash_base": 12000, "stage_gems": 12, "complete_cash": 100000,  "complete_gems": 300,  "first_gems": 500,  "income_per_min": 400 },
+	"high_rise":       {"stage_cash_base": 30000, "stage_gems": 20, "complete_cash": 300000,  "complete_gems": 600,  "first_gems": 1000, "income_per_min": 1000},
+	"skyscraper":      {"stage_cash_base": 80000, "stage_gems": 30, "complete_cash": 1000000, "complete_gems": 1500, "first_gems": 2500, "income_per_min": 3000},
+}
+
 ## Full tier progression (Shed → Skyscraper).
 const TIER_ORDER: Array[String] = [
 	"shed", "single_house", "two_story_house",
@@ -50,6 +78,22 @@ func get_current_stage() -> BuildStageResource:
 	if idx < 0 or idx >= tier.stages.size():
 		return null
 	return tier.stages[idx]
+
+## Returns the permit id required to unlock tier_id, or "" if none needed.
+func get_permit_required(tier_id: String) -> String:
+	return TIER_PERMIT_REQUIRED.get(tier_id, "")
+
+## Returns true if the player can currently select this tier
+## (either no permit required, or the player holds it).
+func is_tier_unlocked(tier_id: String) -> bool:
+	var req: String = get_permit_required(tier_id)
+	if req == "":
+		return true
+	return GameState.has_permit(req)
+
+## Returns reward dict for the given tier (falls back to shed values if unknown).
+func get_tier_rewards(tier_id: String) -> Dictionary:
+	return TIER_REWARDS.get(tier_id, TIER_REWARDS["shed"])
 
 ## Returns the next tier id after current_tier_id, or "" if at the last tier.
 func get_next_tier_id(current_tier_id: String) -> String:

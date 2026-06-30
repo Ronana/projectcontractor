@@ -36,8 +36,9 @@ const SHORTCUT_DEFS: Array = [
 	{"id": "upgrades", "label": "UPGRADES", "symbol": "+"},
 	{"id": "contract", "label": "CONTRACT", "symbol": "R"},
 	{"id": "shop",     "label": "SHOP",     "symbol": "◆"},
-	{"id": "missions", "label": "MISSIONS", "symbol": "M"},
-	{"id": "toolbox",  "label": "TOOLBOX",  "symbol": "T"},
+	{"id": "missions",    "label": "MISSIONS",    "symbol": "M"},
+	{"id": "toolbox",     "label": "TOOLBOX",     "symbol": "T"},
+	{"id": "blueprints",  "label": "BLUEPRINTS",  "symbol": "📐"},
 ]
 
 # ── Colour palette ─────────────────────────────────────────────────────────
@@ -57,6 +58,16 @@ const C_GLASS      := Color(0.55, 0.88, 0.95)
 const C_STEEL_BEAM := Color(0.45, 0.52, 0.65)
 
 const PANEL_TEX_PATH := "res://assets/sprites/ui/panel_grey_bolts_detail_a.svg"
+
+## Per-location spawn bounds (screen coords) for the interactive node sprites.
+## Rect2(x, y, width, height) — should cover only the "workable" soil/ground area
+## of each backdrop so sprites don't appear on surrounding grass/foliage.
+## If a location has no entry the code falls back to the full mine area.
+const LOCATION_SPAWN_BOUNDS: Dictionary = {
+	# Lumber Yard: brown soil diamond — inner rect clear of the pointed corners.
+	# x: 140–540, y: 360–670 (game screen coords; soil bottom is ~y=705)
+	"lumber_yard": Rect2(180, 500, 400, 310),
+}
 
 ## Sprite pools per material. Add an entry here when art is available.
 ## Each node picks a random sprite at a random scale on every spawn/respawn.
@@ -132,19 +143,23 @@ var _mine_backdrop:        TextureRect
 var _last_backdrop_loc:    String = ""
 
 # ── Build panel refs ───────────────────────────────────────────────────────
-var _build_panel:       CanvasLayer
-var _building_sprite:   Sprite2D
-var _house_sheet_tex:   Texture2D
-var _lbl_build_stage:   Label
-var _build_reqs_box:    VBoxContainer
-var _build_prog_bg:     ColorRect
-var _build_prog_fill:   ColorRect
-var _lbl_build_pct:     Label
-var _btn_start_stage:   Button
-var _lbl_cant_start:    Label
-var _btn_tap_build:     Button
-var _lbl_build_bp:      Label
-var _lbl_build_feedback:Label
+var _build_panel:           CanvasLayer
+var _building_sprite:       Sprite2D
+var _house_sheet_tex:       Texture2D
+var _lbl_build_stage:       Label
+var _build_reqs_box:        VBoxContainer
+var _build_prog_bg:         ColorRect
+var _build_prog_fill:       ColorRect
+var _lbl_build_pct:         Label
+var _btn_start_stage:       Button
+var _lbl_cant_start:        Label
+var _lbl_build_cooldown:    Label   # "Site Prep — X:XX remaining" during cooldown
+var _lbl_property_income:   Label   # passive income rate display
+var _btn_tap_build:         Button
+var _lbl_build_bp:          Label
+var _lbl_build_feedback:    Label
+var _property_income_accum: float = 0.0  # fractional cash accumulated this tick
+var _build_panel_timer:     float = 0.0  # seconds counter for cooldown label refresh
 
 # ── Menu overlay refs ──────────────────────────────────────────────────────
 var _menu_overlay: CanvasLayer
@@ -238,6 +253,10 @@ var _boost_strip:           CanvasLayer   # thin strip showing active boost time
 var _boost_chip_box:        HBoxContainer
 var _boost_strip_timer:     float = 0.0
 
+# ── Blueprints panel refs ───────────────────────────────────────────────────
+var _blueprints_panel:      CanvasLayer
+var _bp_scroll_content:     VBoxContainer   # rebuilt each time panel opens
+
 # ── Missions panel refs ─────────────────────────────────────────────────────
 var _missions_panel:      CanvasLayer
 var _mission_card_refs:   Array = []   # [{prog_bar, prog_lbl, claim_btn, mission_id}]
@@ -269,6 +288,7 @@ func _ready() -> void:
 	_build_prestige_confirm_panel()
 	_build_shop_panel()
 	_build_offline_popup()
+	_build_blueprints_panel()
 	_build_missions_panel()
 	MissionManager.missions_changed.connect(_update_missions_panel)
 	_build_toolbox_panel()
@@ -293,6 +313,8 @@ var _mission_countdown_timer: float = 0.0
 
 func _process(delta: float) -> void:
 	_tick_workers(delta)
+	_tick_property_income(delta)
+
 	# Refresh active boost strip every second
 	_boost_strip_timer += delta
 	if _boost_strip_timer >= 1.0:
@@ -308,6 +330,13 @@ func _process(delta: float) -> void:
 				_lbl_daily_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.daily_reset_at)
 			if _lbl_weekly_countdown:
 				_lbl_weekly_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.weekly_reset_at)
+
+	# Refresh build panel cooldown countdown every second while open
+	if _build_panel and _build_panel.visible:
+		_build_panel_timer += delta
+		if _build_panel_timer >= 1.0:
+			_build_panel_timer = 0.0
+			_refresh_build_cooldown_label()
 
 # ══════════════════════════════════════════════════════════════════════════
 # Scene construction
@@ -560,7 +589,7 @@ func _setup_node_vis(vis: Dictionary, mat: String, _node_name: String,
 		if tex:
 			var sp       := Sprite2D.new()
 			sp.texture    = tex
-			sp.scale      = Vector2.ONE * randf_range(0.8, 1.3)
+			sp.scale      = Vector2.ONE * randf_range(0.40, 0.60)
 			c.add_child(sp)
 			vis["sprite"] = sp
 	# ── Fallback: themed ColorRect shapes ────────────────────────────────────
@@ -616,10 +645,18 @@ func _cr(pos: Vector2, sz: Vector2, col: Color) -> ColorRect:
 	return r
 
 func _random_mine_pos(slot_idx: int, total: int) -> Vector2:
-	var x_min := 80.0
-	var x_max := 640.0
-	var y_min := float(MINE_Y) + 100.0
-	var y_max := float(MINE_Y + MINE_H) - 200.0
+	# Use location-specific soil bounds if defined, otherwise full mine area
+	var loc_id := GameState.active_location_id
+	var x_min  := 80.0
+	var x_max  := 640.0
+	var y_min  := float(MINE_Y) + 100.0
+	var y_max  := float(MINE_Y + MINE_H) - 200.0
+	if LOCATION_SPAWN_BOUNDS.has(loc_id):
+		var b: Rect2 = LOCATION_SPAWN_BOUNDS[loc_id]
+		x_min = b.position.x
+		y_min = b.position.y
+		x_max = b.position.x + b.size.x
+		y_max = b.position.y + b.size.y
 	var cols  := clampi(total, 1, 3)
 	var rows  := ceili(float(total) / float(cols))
 	var col   := slot_idx % cols
@@ -1093,8 +1130,9 @@ func _build_menu_overlay() -> void:
 		["UPGRADES", C_XP,      _on_menu_upgrades],
 		["CONTRACT", C_GOLD,    _on_menu_contract],
 		["SHOP",     C_GEM,     _on_shop_btn_pressed],
-		["MISSIONS", C_GOLD,             _on_menu_missions],
-		["TOOLBOX",  Color(0.9, 0.5, 0.2), _on_menu_toolbox],
+		["MISSIONS",   C_GOLD,              _on_menu_missions],
+		["TOOLBOX",    Color(0.9, 0.5, 0.2), _on_menu_toolbox],
+		["BLUEPRINTS", Color(0.4, 0.85, 1.0), _on_menu_blueprints],
 	]
 	var cols      := 3
 	var rows      := 4
@@ -1449,6 +1487,28 @@ func _build_build_panel() -> void:
 	_lbl_build_feedback.modulate.a           = 0.0
 	_lbl_build_feedback.add_theme_color_override("font_color", C_ACCENT)
 	_build_panel.add_child(_lbl_build_feedback)
+
+	# Cooldown label — replaces start button area during Site Prep wait
+	_lbl_build_cooldown                      = Label.new()
+	_lbl_build_cooldown.text                 = ""
+	_lbl_build_cooldown.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_build_cooldown.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+	_lbl_build_cooldown.position             = Vector2(20, 780)
+	_lbl_build_cooldown.size                 = Vector2(SCREEN_W - 40, 66)
+	_lbl_build_cooldown.add_theme_font_size_override("font_size", 18)
+	_lbl_build_cooldown.add_theme_color_override("font_color", Color(1.0, 0.75, 0.2))
+	_lbl_build_cooldown.visible              = false
+	_build_panel.add_child(_lbl_build_cooldown)
+
+	# Property income label — shows total skyline income rate
+	_lbl_property_income                      = Label.new()
+	_lbl_property_income.text                 = ""
+	_lbl_property_income.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_property_income.position             = Vector2(20, 960)
+	_lbl_property_income.size                 = Vector2(SCREEN_W - 40, 28)
+	_lbl_property_income.add_theme_font_size_override("font_size", 14)
+	_lbl_property_income.add_theme_color_override("font_color", C_DIM)
+	_build_panel.add_child(_lbl_property_income)
 
 # ── Crew overlay panel ──────────────────────────────────────────────────────
 func _build_crew_panel() -> void:
@@ -2790,6 +2850,7 @@ func _close_all_panels() -> void:
 	_prestige_confirm_panel.visible = false
 	_shop_panel.visible            = false
 	_missions_panel.visible        = false
+	_blueprints_panel.visible      = false
 	_toolbox_panel.visible         = false
 	_menu_overlay.visible          = false
 	_loc_picker_panel.visible      = false
@@ -2816,9 +2877,10 @@ func _shortcut_color(id: String) -> Color:
 		"upgrades": return C_XP
 		"contract": return C_GEM.darkened(0.3)
 		"shop":     return C_GEM
-		"missions": return C_GOLD
-		"toolbox":  return Color(0.90, 0.50, 0.20)
-		_:          return C_DIM
+		"missions":   return C_GOLD
+		"toolbox":    return Color(0.90, 0.50, 0.20)
+		"blueprints": return Color(0.40, 0.85, 1.00)
+		_:            return C_DIM
 
 ## Return the SHORTCUT_DEFS entry for id, or empty dict if not found.
 func _shortcut_def(id: String) -> Dictionary:
@@ -2838,9 +2900,10 @@ func _on_shortcut_pressed(id: String) -> void:
 		"upgrades": _on_menu_upgrades()
 		"contract": _on_menu_contract()
 		"shop":     _on_shop_btn_pressed()
-		"missions": _on_menu_missions()
-		"toolbox":  _on_menu_toolbox()
-		"mine":     _on_menu_mine()
+		"missions":   _on_menu_missions()
+		"toolbox":    _on_menu_toolbox()
+		"blueprints": _on_menu_blueprints()
+		"mine":        _on_menu_mine()
 
 ## Open the pin customiser panel (called from the "Edit Quick Bar" button).
 func _on_pin_edit_open() -> void:
@@ -3165,6 +3228,9 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	MissionManager.add_progress("collect_mat", mat, total_drop)
 	MissionManager.add_progress("break_nodes", "", 1)
 	_gain_xp(total_xp)
+	# 15% chance: award a material blueprint fragment
+	if randf() < 0.15:
+		_award_blueprint_fragment(BlueprintDatabase.mat_drop_id(mat))
 
 	if loc_id == GameState.active_location_id:
 		_flash_feedback("+%d %s   +%.0f XP" % [total_drop, mat.capitalize(), total_xp])
@@ -3184,6 +3250,7 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 		_spawn_wave(loc_id)
 
 	_update_hud()
+	_update_mine_mat_label()
 
 ## Spawn a fresh wave of nodes for a location with randomised HP.
 func _spawn_wave(loc_id: String) -> void:
@@ -3263,6 +3330,10 @@ func _worker_damage_rate(loc_id: String) -> float:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _on_start_stage_pressed() -> void:
+	# Block if site prep cooldown is still active
+	var cooldown_until := float(GameState.current_building.get("stage_cooldown_until", 0.0))
+	if Time.get_unix_time_from_system() < cooldown_until:
+		return
 	var stage := BuildDatabase.get_current_stage()
 	if not stage:
 		return
@@ -3317,29 +3388,60 @@ func _complete_stage() -> void:
 	if not stage:
 		return
 
-	var reward: int = int(float(25 + stage.stage_order * 10) * GameState.get_stage_cash_mult())
+	var tier_id: String  = GameState.current_building.get("tier_id", "shed")
+	var rewards          := BuildDatabase.get_tier_rewards(tier_id)
+	var base_cash: int   = int(rewards.get("stage_cash_base", 100))
+	# Scale cash slightly per stage within the tier (each stage +20% of base)
+	var stage_cash: int  = base_cash + stage.stage_order * (base_cash / 5)
+	var reward: int      = int(float(stage_cash) * GameState.get_stage_cash_mult() * GameState.get_building_cash_mult(tier_id))
+	var gem_reward: int  = int(rewards.get("stage_gems", 1))
+
 	GameState.cash += reward
-	GameState.gems += 1
+	GameState.gems += gem_reward
 	MissionManager.add_progress("complete_stages", "", 1)
+	# 30% chance: award a building blueprint fragment on stage complete
+	if randf() < 0.30:
+		_award_blueprint_fragment(BlueprintDatabase.building_drop_id(tier_id))
 
 	var new_idx: int = int(GameState.current_building.get("stage_index", 0)) + 1
-	GameState.current_building["stage_index"]   = new_idx
+	GameState.current_building["stage_index"]    = new_idx
 	GameState.current_building["stage_started"]  = false
 	GameState.current_building["stage_progress"] = 0.0
 
-	var tier := BuildDatabase.get_tier(GameState.current_building.get("tier_id", "shed"))
+	var tier := BuildDatabase.get_tier(tier_id)
 	if tier and new_idx >= tier.stages.size():
 		_complete_building()
 	else:
-		_flash_feedback("Stage done!  +%d cash" % reward)
+		# Start 10-minute Site Prep cooldown between stages
+		GameState.current_building["stage_cooldown_until"] = Time.get_unix_time_from_system() + 600.0
+		_flash_feedback("Stage done!  +%s  +%d 💎" % [_fmt(reward), gem_reward])
 		_update_build_panel()
 		_update_hud()
 
 func _complete_building() -> void:
 	var tier_id: String = GameState.current_building.get("tier_id", "shed")
 	GameState.skyline.append(tier_id)
-	GameState.cash += 100
-	GameState.gems += 5
+
+	var rewards      := BuildDatabase.get_tier_rewards(tier_id)
+	var cash_reward: int = int(rewards.get("complete_cash", 500))
+	var gem_reward: int  = int(rewards.get("complete_gems", 8))
+	GameState.cash += cash_reward
+	GameState.gems += gem_reward
+
+	# First completion bonus (one-time, permanent)
+	var first_bonus_gems := 0
+	if not GameState.first_completions.has(tier_id):
+		GameState.first_completions.append(tier_id)
+		first_bonus_gems = int(rewards.get("first_gems", 0))
+		GameState.gems  += first_bonus_gems
+
+	# Check if any permit is now earned based on completion counts
+	_check_permit_awards()
+
+	var base_msg   := "Building complete!  +%s  +%d 💎" % [_fmt(cash_reward), gem_reward]
+	var bonus_line := ""
+	if first_bonus_gems > 0:
+		bonus_line = "\n⭐ First build bonus  +%d 💎!" % first_bonus_gems
 
 	var next_id := BuildDatabase.get_next_tier_id(tier_id)
 
@@ -3349,20 +3451,21 @@ func _complete_building() -> void:
 			"tier_id": tier_id, "stage_index": 0,
 			"stage_progress": 0.0, "stage_started": false
 		}
-		_flash_feedback("Building complete!  +100 cash\nSkyline: %d" % GameState.skyline.size())
+		_flash_feedback(base_msg + bonus_line)
 		_update_build_panel()
 		_update_hud()
 		return
 
 	var next_tier := BuildDatabase.get_tier(next_id)
 	var bp        := GameState.get_build_power()
+	var permit_ok := BuildDatabase.is_tier_unlocked(next_id)
 
-	if next_tier and bp >= next_tier.build_power_required:
+	if next_tier and bp >= next_tier.build_power_required and permit_ok:
 		GameState.current_building = {
 			"tier_id": next_id, "stage_index": 0,
 			"stage_progress": 0.0, "stage_started": false
 		}
-		_flash_feedback("Building complete!  +100 cash\nNow: %s" % next_tier.display_name)
+		_flash_feedback(base_msg + bonus_line + "\nNow: %s" % next_tier.display_name)
 		_update_build_panel()
 		_update_hud()
 	else:
@@ -3370,7 +3473,7 @@ func _complete_building() -> void:
 			"tier_id": tier_id, "stage_index": 0,
 			"stage_progress": 0.0, "stage_started": false
 		}
-		_flash_feedback("Building complete!  +100 cash")
+		_flash_feedback(base_msg + bonus_line)
 		_update_build_panel()
 		_update_hud()
 		_show_wall_panel(next_id)
@@ -3522,6 +3625,9 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 	var yield_qty := 2 if randf() < GameState.get_double_craft_chance() else 1
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + yield_qty
 	MissionManager.add_progress("craft_items", "", yield_qty)
+	# 20% chance: award a refined blueprint fragment
+	if randf() < 0.20:
+		_award_blueprint_fragment(BlueprintDatabase.craft_drop_id(ref_id))
 	_update_craft_panel()
 
 func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
@@ -3799,6 +3905,11 @@ func _on_menu_missions() -> void:
 	_close_all_panels()
 	_update_missions_panel()
 	_missions_panel.visible = true
+
+func _on_menu_blueprints() -> void:
+	_close_all_panels()
+	_update_blueprints_panel()
+	_blueprints_panel.visible = true
 
 # ══════════════════════════════════════════════════════════════════════════
 # Toolbox Panel
@@ -4331,12 +4442,17 @@ func _update_mine_screen() -> void:
 	_update_mine_hps(loc_id)
 
 	# Info strip
-	var mat_count: int = GameState.materials.get(mat, 0)
-	_lbl_mat_count.text = "%s: %s" % [mat.capitalize(), _fmt(mat_count)]
-	_lbl_mat_count.add_theme_color_override("font_color", accent)
+	_update_mine_mat_label()
 	var mp    := GameState.get_mine_power()
 	var wrate := _worker_damage_rate(loc_id)
 	_lbl_mine_rate.text = "Mine Power: %d  ·  Workers: %.1f HP/s" % [mp, wrate]
+
+## Updates only the material count label — cheap, safe to call after every node break.
+func _update_mine_mat_label() -> void:
+	var loc_data := BuildDatabase.get_location(GameState.active_location_id)
+	var mat: String = loc_data.get("material", "timber")
+	_lbl_mat_count.text = "%s: %s" % [mat.capitalize(), _fmt(GameState.materials.get(mat, 0))]
+	_lbl_mat_count.add_theme_color_override("font_color", _mat_color(mat))
 
 func _update_build_panel() -> void:
 	var tier := BuildDatabase.get_tier(GameState.current_building.get("tier_id", "shed"))
@@ -4366,15 +4482,28 @@ func _update_build_panel() -> void:
 	# Build Power stat
 	_lbl_build_bp.text = "Build Power: %d" % GameState.get_build_power()
 
+	# Property income rate — always visible when build panel open
+	if _lbl_property_income:
+		var income_rate := GameState.get_property_income_rate()
+		if income_rate > 0.0:
+			_lbl_property_income.text = "🏘 Property income: %s / min" % _fmt(int(income_rate))
+		else:
+			_lbl_property_income.text = "🏘 Build your skyline to earn passive income"
+
+	# Check whether a site prep cooldown is still active
+	var cooldown_until := float(GameState.current_building.get("stage_cooldown_until", 0.0))
+	var in_cooldown    := not started and Time.get_unix_time_from_system() < cooldown_until
+
 	if started:
 		# Progress view
-		_build_reqs_box.visible  = false
-		_btn_start_stage.visible = false
-		_lbl_cant_start.visible  = false
-		_build_prog_bg.visible   = true
-		_build_prog_fill.visible = true
-		_lbl_build_pct.visible   = true
-		_btn_tap_build.visible   = true
+		_build_reqs_box.visible           = false
+		_btn_start_stage.visible          = false
+		_lbl_cant_start.visible           = false
+		_lbl_build_cooldown.visible       = false
+		_build_prog_bg.visible            = true
+		_build_prog_fill.visible          = true
+		_lbl_build_pct.visible            = true
+		_btn_tap_build.visible            = true
 		# Show the two sibling nodes (tap bg + accent bar) that are children of the panel
 		if _build_panel.get_node_or_null("TapBuildBg"):
 			_build_panel.get_node("TapBuildBg").visible   = true
@@ -4395,6 +4524,15 @@ func _update_build_panel() -> void:
 			_build_panel.get_node("TapBuildBg").visible  = false
 		if _build_panel.get_node_or_null("TapBuildBar"):
 			_build_panel.get_node("TapBuildBar").visible = false
+
+		# Cooldown display — hides the start button while site prep is active
+		if in_cooldown:
+			_lbl_build_cooldown.visible = true
+			_refresh_build_cooldown_label()
+			_btn_start_stage.visible    = false
+			_lbl_cant_start.visible     = false
+		else:
+			_lbl_build_cooldown.visible = false
 
 		# Rebuild requirement rows
 		for child in _build_reqs_box.get_children():
@@ -4432,23 +4570,25 @@ func _update_build_panel() -> void:
 				spacer.custom_minimum_size = Vector2(0, 8)
 				_build_reqs_box.add_child(spacer)
 
-			_btn_start_stage.visible  = can_afford
-			_lbl_cant_start.visible   = not can_afford
+			if not in_cooldown:
+				_btn_start_stage.visible  = can_afford
+				_lbl_cant_start.visible   = not can_afford
 
-			# Check build power gate
-			if can_afford and tier:
-				var bp       := GameState.get_build_power()
-				var required := tier.build_power_required
-				if bp < required:
-					_btn_start_stage.visible = false
-					_lbl_cant_start.visible  = true
-					_lbl_cant_start.text     = ("Build Power too low: need %d, have %d" \
-						% [required, bp])
-				else:
-					_lbl_cant_start.text = "Not enough materials."
+				# Check build power gate
+				if can_afford and tier:
+					var bp       := GameState.get_build_power()
+					var required := tier.build_power_required
+					if bp < required:
+						_btn_start_stage.visible = false
+						_lbl_cant_start.visible  = true
+						_lbl_cant_start.text     = ("Build Power too low: need %d, have %d" \
+							% [required, bp])
+					else:
+						_lbl_cant_start.text = "Not enough materials."
 		else:
-			_btn_start_stage.visible = false
-			_lbl_cant_start.visible  = false
+			if not in_cooldown:
+				_btn_start_stage.visible = false
+				_lbl_cant_start.visible  = false
 
 # ══════════════════════════════════════════════════════════════════════════
 # Helpers
@@ -4537,6 +4677,33 @@ func _flash_build_feedback(msg: String) -> void:
 	tw.tween_property(_lbl_build_feedback, "modulate:a", 1.0, 0.05)
 	tw.tween_interval(0.6)
 	tw.tween_property(_lbl_build_feedback, "modulate:a", 0.0, 0.3)
+
+## Accumulates passive property income and awards it as whole-cash chunks.
+func _tick_property_income(delta: float) -> void:
+	var rate := GameState.get_property_income_rate()
+	if rate <= 0.0:
+		return
+	_property_income_accum += rate / 60.0 * delta
+	if _property_income_accum >= 1.0:
+		var earned := int(_property_income_accum)
+		GameState.cash          += earned
+		_property_income_accum  -= float(earned)
+		_update_hud()
+
+## Updates the Site Prep cooldown label with MM:SS remaining. Called every second.
+func _refresh_build_cooldown_label() -> void:
+	if not _lbl_build_cooldown:
+		return
+	var cooldown_until := float(GameState.current_building.get("stage_cooldown_until", 0.0))
+	var remaining      := cooldown_until - Time.get_unix_time_from_system()
+	if remaining <= 0.0:
+		# Cooldown just expired — refresh full panel to reveal the start button
+		_lbl_build_cooldown.visible = false
+		_update_build_panel()
+		return
+	var mins := int(remaining) / 60
+	var secs := int(remaining) % 60
+	_lbl_build_cooldown.text = "🔨 Site Prep — %d:%02d remaining" % [mins, secs]
 
 
 # ── Offline gains summary ──────────────────────────────────────────────────
@@ -4730,3 +4897,408 @@ func _check_offline_summary() -> void:
 	if summary.gains.is_empty():
 		return
 	_show_offline_popup(summary)
+
+# ══════════════════════════════════════════════════════════════════════════
+# Blueprints & Permits panel
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_blueprints_panel() -> void:
+	_blueprints_panel         = CanvasLayer.new()
+	_blueprints_panel.name    = "BlueprintsPanel"
+	_blueprints_panel.layer   = 22
+	_blueprints_panel.visible = false
+	add_child(_blueprints_panel)
+
+	# Panel background
+	var bg      := ColorRect.new()
+	bg.color     = C_PANEL
+	bg.position  = Vector2.ZERO
+	bg.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
+	_blueprints_panel.add_child(bg)
+
+	var close_btn := _build_panel_header(_blueprints_panel, "BLUEPRINTS & PERMITS", Color(0.40, 0.85, 1.00))
+	close_btn.pressed.connect(func() -> void: _blueprints_panel.visible = false)
+
+	# ScrollContainer below header (header is 78px high)
+	const HDR_H := 80
+	var scroll      := ScrollContainer.new()
+	scroll.position  = Vector2(0, HDR_H)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - HDR_H)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_blueprints_panel.add_child(scroll)
+
+	_bp_scroll_content                                = VBoxContainer.new()
+	_bp_scroll_content.custom_minimum_size            = Vector2(SCREEN_W, 0)
+	_bp_scroll_content.add_theme_constant_override("separation", 0)
+	scroll.add_child(_bp_scroll_content)
+
+## Rebuilds all blueprint + permit cards inside the scroll content.
+func _update_blueprints_panel() -> void:
+	if not _bp_scroll_content:
+		return
+	for ch in _bp_scroll_content.get_children():
+		_bp_scroll_content.remove_child(ch)
+		ch.queue_free()
+
+	const CATEGORIES: Array = [
+		["raw",      "RAW MATERIALS",     Color(0.95, 0.72, 0.30)],
+		["refined",  "REFINED MATERIALS", Color(0.55, 0.88, 0.95)],
+		["building", "BUILDINGS",         Color(0.70, 0.50, 1.00)],
+		["general",  "GENERAL",           Color(0.40, 0.90, 0.60)],
+	]
+
+	for cat_info in CATEGORIES:
+		var cat_id   : String = cat_info[0]
+		var cat_name : String = cat_info[1]
+		var cat_col  : Color  = cat_info[2]
+
+		var cat_bps := BlueprintDatabase.get_all_by_category(cat_id)
+		if cat_bps.is_empty():
+			continue
+
+		# Category header strip
+		var hdr_bg      := ColorRect.new()
+		hdr_bg.color     = cat_col.darkened(0.72)
+		hdr_bg.custom_minimum_size = Vector2(SCREEN_W, 36)
+		_bp_scroll_content.add_child(hdr_bg)
+
+		var hdr_lbl      := Label.new()
+		hdr_lbl.text      = "  " + cat_name
+		hdr_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		hdr_lbl.position  = Vector2.ZERO
+		hdr_lbl.size      = Vector2(SCREEN_W, 36)
+		hdr_lbl.add_theme_font_size_override("font_size", 13)
+		hdr_lbl.add_theme_color_override("font_color", cat_col)
+		hdr_bg.add_child(hdr_lbl)
+
+		# Grid: 2 columns
+		var grid       := GridContainer.new()
+		grid.columns    = 2
+		grid.add_theme_constant_override("h_separation", 2)
+		grid.add_theme_constant_override("v_separation", 2)
+		_bp_scroll_content.add_child(grid)
+
+		for bp: Dictionary in cat_bps:
+			var bp_id   : String = bp.get("id", "")
+			var entry   : Dictionary = GameState.blueprints.get(bp_id, {})
+			var lvl     : int    = int(entry.get("level", 0))
+			var frags   : int    = int(entry.get("fragments", 0))
+			var next_need: int   = BlueprintDatabase.fragments_for_next_level(lvl)
+			var bp_col  : Color  = bp.get("color", cat_col)
+			var symbol  : String = bp.get("symbol", "?")
+			var bp_name : String = bp.get("name", "")
+			var bonus_pct: int   = int(BlueprintDatabase.total_bonus(lvl) * 100.0)
+
+			# Card container
+			var card      := ColorRect.new()
+			card.color     = C_CARD
+			card.custom_minimum_size = Vector2(359, 88)
+			grid.add_child(card)
+
+			# Accent left strip
+			var accent_bar      := ColorRect.new()
+			accent_bar.color     = bp_col
+			accent_bar.position  = Vector2(0, 0)
+			accent_bar.size      = Vector2(4, 88)
+			card.add_child(accent_bar)
+
+			# Symbol square
+			var sym_bg      := ColorRect.new()
+			sym_bg.color     = bp_col.darkened(0.55)
+			sym_bg.position  = Vector2(8, 12)
+			sym_bg.size      = Vector2(44, 44)
+			card.add_child(sym_bg)
+
+			var sym_lbl      := Label.new()
+			sym_lbl.text      = symbol
+			sym_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			sym_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
+			sym_lbl.position  = Vector2(8, 12)
+			sym_lbl.size      = Vector2(44, 44)
+			sym_lbl.add_theme_font_size_override("font_size", 13)
+			sym_lbl.add_theme_color_override("font_color", bp_col)
+			card.add_child(sym_lbl)
+
+			# Blueprint name
+			var name_lbl      := Label.new()
+			name_lbl.text      = bp_name.replace(" Blueprint", "")
+			name_lbl.position  = Vector2(58, 8)
+			name_lbl.size      = Vector2(230, 24)
+			name_lbl.add_theme_font_size_override("font_size", 13)
+			name_lbl.add_theme_color_override("font_color", Color.WHITE)
+			card.add_child(name_lbl)
+
+			# Bonus label
+			var bonus_lbl      := Label.new()
+			bonus_lbl.text      = "+%d%% bonus" % bonus_pct if lvl > 0 else "No bonus yet"
+			bonus_lbl.position  = Vector2(58, 30)
+			bonus_lbl.size      = Vector2(230, 22)
+			bonus_lbl.add_theme_font_size_override("font_size", 11)
+			bonus_lbl.add_theme_color_override("font_color", bp_col if lvl > 0 else Color(0.40, 0.42, 0.55))
+			card.add_child(bonus_lbl)
+
+			# Level dots (5 dots across bottom-left area)
+			for di in BlueprintDatabase.MAX_LEVEL:
+				var dot      := ColorRect.new()
+				dot.color     = bp_col if di < lvl else Color(0.20, 0.22, 0.30)
+				dot.position  = Vector2(58 + di * 18, 56)
+				dot.size      = Vector2(14, 14)
+				card.add_child(dot)
+
+			# Fragment bar + label
+			if lvl < BlueprintDatabase.MAX_LEVEL:
+				var frag_bg      := ColorRect.new()
+				frag_bg.color     = Color(0.12, 0.13, 0.18)
+				frag_bg.position  = Vector2(8, 74)
+				frag_bg.size      = Vector2(343, 8)
+				card.add_child(frag_bg)
+
+				var frag_pct := float(frags) / float(next_need) if next_need > 0 else 1.0
+				var frag_fill     := ColorRect.new()
+				frag_fill.color    = bp_col
+				frag_fill.position = Vector2(8, 74)
+				frag_fill.size     = Vector2(int(343.0 * frag_pct), 8)
+				card.add_child(frag_fill)
+
+				var frag_lbl      := Label.new()
+				frag_lbl.text      = "%d / %d frags" % [frags, next_need]
+				frag_lbl.position  = Vector2(160, 56)
+				frag_lbl.size      = Vector2(190, 16)
+				frag_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+				frag_lbl.add_theme_font_size_override("font_size", 11)
+				frag_lbl.add_theme_color_override("font_color", Color(0.45, 0.48, 0.60))
+				card.add_child(frag_lbl)
+			else:
+				var max_lbl      := Label.new()
+				max_lbl.text      = "MAX LEVEL"
+				max_lbl.position  = Vector2(58, 70)
+				max_lbl.size      = Vector2(290, 16)
+				max_lbl.add_theme_font_size_override("font_size", 11)
+				max_lbl.add_theme_color_override("font_color", C_GOLD)
+				card.add_child(max_lbl)
+
+	# ── Permits section ────────────────────────────────────────────────────
+	var perm_hdr_bg      := ColorRect.new()
+	perm_hdr_bg.color     = Color(0.12, 0.10, 0.20)
+	perm_hdr_bg.custom_minimum_size = Vector2(SCREEN_W, 36)
+	_bp_scroll_content.add_child(perm_hdr_bg)
+
+	var perm_hdr_lbl      := Label.new()
+	perm_hdr_lbl.text      = "  PERMITS"
+	perm_hdr_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	perm_hdr_lbl.position  = Vector2.ZERO
+	perm_hdr_lbl.size      = Vector2(SCREEN_W, 36)
+	perm_hdr_lbl.add_theme_font_size_override("font_size", 13)
+	perm_hdr_lbl.add_theme_color_override("font_color", Color(0.70, 0.50, 1.00))
+	perm_hdr_bg.add_child(perm_hdr_lbl)
+
+	for permit: Dictionary in BlueprintDatabase.PERMITS:
+		var pid       : String = permit.get("id", "")
+		var pname     : String = permit.get("name", "")
+		var pdesc     : String = permit.get("desc", "")
+		var req_tier  : String = permit.get("unlock_tier", "")
+		var req_count : int    = int(permit.get("completions_required", 3))
+		var pcolor    : Color  = permit.get("color", Color.WHITE)
+		var earned    : bool   = GameState.has_permit(pid)
+
+		# Count how many times the player has completed req_tier
+		var completions := 0
+		for t: String in GameState.skyline:
+			if t == req_tier:
+				completions += 1
+
+		var pcard      := ColorRect.new()
+		pcard.color     = C_CARD
+		pcard.custom_minimum_size = Vector2(SCREEN_W - 16, 96)
+		_bp_scroll_content.add_child(pcard)
+
+		# Side accent
+		var paccent      := ColorRect.new()
+		paccent.color     = pcolor if earned else C_BORDER
+		paccent.position  = Vector2(0, 0)
+		paccent.size      = Vector2(4, 96)
+		pcard.add_child(paccent)
+
+		# Name
+		var pname_lbl      := Label.new()
+		pname_lbl.text      = pname
+		pname_lbl.position  = Vector2(12, 8)
+		pname_lbl.size      = Vector2(560, 28)
+		pname_lbl.add_theme_font_size_override("font_size", 15)
+		pname_lbl.add_theme_color_override("font_color", pcolor if earned else Color(0.45, 0.48, 0.60))
+		pcard.add_child(pname_lbl)
+
+		# Description
+		var pdesc_lbl      := Label.new()
+		pdesc_lbl.text      = pdesc
+		pdesc_lbl.position  = Vector2(12, 34)
+		pdesc_lbl.size      = Vector2(560, 22)
+		pdesc_lbl.add_theme_font_size_override("font_size", 12)
+		pdesc_lbl.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
+		pcard.add_child(pdesc_lbl)
+
+		# Status badge
+		var status_lbl      := Label.new()
+		status_lbl.text      = "✓ EARNED" if earned else "LOCKED"
+		status_lbl.position  = Vector2(SCREEN_W - 120, 8)
+		status_lbl.size      = Vector2(100, 28)
+		status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		status_lbl.add_theme_font_size_override("font_size", 13)
+		status_lbl.add_theme_color_override("font_color", C_GOLD if earned else Color(0.40, 0.42, 0.55))
+		pcard.add_child(status_lbl)
+
+		# Completion progress bar
+		var req_tier_name := req_tier.replace("_", " ").capitalize()
+		var prog_lbl      := Label.new()
+		prog_lbl.text      = "%s completions: %d / %d" % [req_tier_name, mini(completions, req_count), req_count]
+		prog_lbl.position  = Vector2(12, 56)
+		prog_lbl.size      = Vector2(560, 18)
+		prog_lbl.add_theme_font_size_override("font_size", 11)
+		prog_lbl.add_theme_color_override("font_color", Color(0.45, 0.48, 0.60))
+		pcard.add_child(prog_lbl)
+
+		var bar_bg      := ColorRect.new()
+		bar_bg.color     = Color(0.12, 0.13, 0.18)
+		bar_bg.position  = Vector2(12, 76)
+		bar_bg.size      = Vector2(SCREEN_W - 36, 8)
+		pcard.add_child(bar_bg)
+
+		var bar_pct := minf(float(completions) / float(req_count), 1.0)
+		var bar_fill     := ColorRect.new()
+		bar_fill.color    = pcolor if earned else pcolor.darkened(0.4)
+		bar_fill.position = Vector2(12, 76)
+		bar_fill.size     = Vector2(int(float(SCREEN_W - 36) * bar_pct), 8)
+		pcard.add_child(bar_fill)
+
+	# Bottom padding
+	var pad      := Control.new()
+	pad.custom_minimum_size = Vector2(SCREEN_W, 24)
+	_bp_scroll_content.add_child(pad)
+
+## Award one blueprint fragment, level up if threshold reached, then save.
+func _award_blueprint_fragment(bp_id: String) -> void:
+	var bp := BlueprintDatabase.get_blueprint(bp_id)
+	if bp.is_empty():
+		return
+
+	if not GameState.blueprints.has(bp_id):
+		GameState.blueprints[bp_id] = {"level": 0, "fragments": 0}
+
+	var entry: Dictionary = GameState.blueprints[bp_id]
+	var lvl: int          = int(entry.get("level", 0))
+
+	if lvl >= BlueprintDatabase.MAX_LEVEL:
+		return   # already maxed
+
+	entry["fragments"] = int(entry.get("fragments", 0)) + 1
+	var threshold: int  = BlueprintDatabase.fragments_for_next_level(lvl)
+
+	# Short display name: strip " Blueprint" suffix
+	var short_name: String = bp.get("name", bp_id).replace(" Blueprint", "")
+
+	if entry["fragments"] >= threshold:
+		entry["fragments"] = 0
+		entry["level"]     = lvl + 1
+		GameState.blueprints[bp_id] = entry
+		_show_fragment_popup(short_name, bp.get("color", Color.WHITE),
+			"LEVEL UP!", "Now Lv %d  (+%d%% bonus)" % [entry["level"],
+			int(BlueprintDatabase.total_bonus(entry["level"]) * 100.0)])
+	else:
+		GameState.blueprints[bp_id] = entry
+		_show_fragment_popup(short_name, bp.get("color", Color.WHITE),
+			"Fragment found",
+			"%d / %d toward Lv %d" % [entry["fragments"], threshold, lvl + 1])
+
+## Shows a small toast-style popup near the top of the mine area.
+## Auto-dismisses after ~2.5 s.
+func _show_fragment_popup(title: String, accent: Color, header: String, sub: String) -> void:
+	# Remove any existing popup node so they don't stack
+	var old := get_node_or_null("FragmentPopup")
+	if old:
+		old.queue_free()
+
+	const POP_W  := 380
+	const POP_H  := 76
+	const POP_X  := int((SCREEN_W - POP_W) / 2.0)
+	const POP_Y  := MINE_Y + 24   # just below the location bar
+
+	var cl      := CanvasLayer.new()
+	cl.name      = "FragmentPopup"
+	cl.layer     = 35   # above panels, below prestige confirm
+	add_child(cl)
+
+	# Card background
+	var bg      := ColorRect.new()
+	bg.color     = Color(0.08, 0.09, 0.14, 0.96)
+	bg.position  = Vector2(POP_X, POP_Y)
+	bg.size      = Vector2(POP_W, POP_H)
+	cl.add_child(bg)
+
+	# Accent top strip in the blueprint's colour
+	var strip      := ColorRect.new()
+	strip.color     = accent
+	strip.position  = Vector2(POP_X, POP_Y)
+	strip.size      = Vector2(POP_W, 3)
+	cl.add_child(strip)
+
+	# Left colour swatch
+	var swatch      := ColorRect.new()
+	swatch.color     = accent
+	swatch.position  = Vector2(POP_X, POP_Y + 3)
+	swatch.size      = Vector2(4, POP_H - 3)
+	cl.add_child(swatch)
+
+	# Blueprint name (top-left, in accent colour)
+	var name_lbl      := Label.new()
+	name_lbl.text      = title
+	name_lbl.position  = Vector2(POP_X + 12, POP_Y + 6)
+	name_lbl.size      = Vector2(POP_W - 16, 22)
+	name_lbl.add_theme_font_size_override("font_size", 13)
+	name_lbl.add_theme_color_override("font_color", accent)
+	cl.add_child(name_lbl)
+
+	# Header (e.g. "Fragment found" or "LEVEL UP!")
+	var hdr_lbl      := Label.new()
+	hdr_lbl.text      = header
+	hdr_lbl.position  = Vector2(POP_X + 12, POP_Y + 26)
+	hdr_lbl.size      = Vector2(POP_W - 16, 22)
+	hdr_lbl.add_theme_font_size_override("font_size", 14)
+	hdr_lbl.add_theme_color_override("font_color", Color.WHITE)
+	cl.add_child(hdr_lbl)
+
+	# Sub text (e.g. "2 / 3 toward Lv 1")
+	var sub_lbl      := Label.new()
+	sub_lbl.text      = sub
+	sub_lbl.position  = Vector2(POP_X + 12, POP_Y + 48)
+	sub_lbl.size      = Vector2(POP_W - 16, 20)
+	sub_lbl.add_theme_font_size_override("font_size", 12)
+	sub_lbl.add_theme_color_override("font_color", Color(0.50, 0.52, 0.65))
+	cl.add_child(sub_lbl)
+
+	# Slide in from top + fade out after 2.5 s
+	cl.offset      = Vector2(0, -POP_H - 10)
+	var tw := create_tween()
+	tw.tween_property(cl, "offset", Vector2.ZERO, 0.18).set_ease(Tween.EASE_OUT)
+	tw.tween_interval(2.2)
+	tw.tween_property(cl, "offset", Vector2(0, -POP_H - 10), 0.25).set_ease(Tween.EASE_IN)
+	tw.tween_callback(cl.queue_free)
+
+## Check all permits and award any that have newly been earned.
+func _check_permit_awards() -> void:
+	for permit: Dictionary in BlueprintDatabase.PERMITS:
+		var pid      : String = permit.get("id", "")
+		if GameState.has_permit(pid):
+			continue   # already earned
+
+		var req_tier  : String = permit.get("unlock_tier", "")
+		var req_count : int    = int(permit.get("completions_required", 3))
+
+		var completions := 0
+		for t: String in GameState.skyline:
+			if t == req_tier:
+				completions += 1
+
+		if completions >= req_count:
+			GameState.permits.append(pid)
+			var pname: String = permit.get("name", pid)
+			_flash_feedback("Permit earned!\n%s" % pname)

@@ -524,3 +524,101 @@ Nothing — all functions implemented.
 5. Use a timed boost — boost strip appears at top of mine area with countdown chip
 6. Use TNT Charge — all nodes clear and respawn immediately
 7. Commit once testing passes
+
+---
+
+## 2026-06-29 — Toolbox float button + integer division fixes
+
+### Completed this session
+- **Floating TOOLS button**: CanvasLayer layer=9 (below HUD, above boost strip), positioned bottom-right of mine area; orange 60×60 square with ⚒ symbol and "TOOLS" sub-label; taps open the toolbox panel
+- **Toolbox redesigned as bottom sheet**: panel now covers bottom 42% of screen (SHEET_Y=700, SHEET_H=480) leaving mine visible above; scrim above is tappable to dismiss; matches IOM visual style
+- **Toolbox cells redesigned**: compact 80px cells — rarity strip at top (not left), 38×38 symbol square centred, right/bottom border separators, count badge bottom-right
+- **Integer division**: 22 warnings → 0 across Main.gd and MissionManager.gd (18 in first pass, 5 more in second)
+  - Pattern: `/2` → `/2.0`, `/ int` → `int(/ float(int))`
+  - Unused variable `ref_ids` renamed to `_ref_ids`; unused `node_name` param renamed to `_node_name`
+- **Git committed** (phase checkpoint): clean commit message referencing toolbox phase
+
+---
+
+## 2026-06-29 — Blueprint & Permit system
+
+### Completed this session
+
+**New files**
+- `scripts/autoload/BlueprintDatabase.gd`: 23 blueprints (8 raw materials, 4 refined, 8 buildings, 3 general) + 4 permits; `FRAGMENTS_PER_LEVEL=[3,5,8,12,20]`, `BONUS_PER_LEVEL=0.08`; public API: `get_blueprint`, `get_all_by_category`, `get_permit`, `fragments_for_next_level`, `total_bonus`, `mat_drop_id`, `building_drop_id`, `craft_drop_id`
+
+**Updated autoloads**
+- `GameState.gd`: added `blueprints: Dictionary` (bp_id → {level, fragments}), `permits: Array`; helpers `get_mat_yield_mult(mat_id)`, `get_building_cash_mult(tier_id)`, `has_permit(permit_id)`
+- `SaveManager.gd`: saves/loads `blueprints` and `permits`; `_init_fresh_state` zeroes both
+- `BuildDatabase.gd`: added `TIER_PERMIT_REQUIRED` const dict (tiers 4–8 → their permit); `get_permit_required(tier_id)`, `is_tier_unlocked(tier_id)` helpers
+- `project.godot`: `BlueprintDatabase` registered after `ToolboxDatabase`
+
+**Main.gd changes**
+- `SHORTCUT_DEFS`: `"blueprints"` added (📐 symbol, cyan colour)
+- Member vars: `_blueprints_panel`, `_bp_scroll_content`
+- `_ready()`: calls `_build_blueprints_panel()`
+- `_close_all_panels()`: hides `_blueprints_panel`
+- `_shortcut_color()` + `_on_shortcut_pressed()` + `_on_menu_blueprints()` added
+- `_break_node()`: 15% chance to call `_award_blueprint_fragment(mat_drop_id(mat))`
+- `_complete_stage()`: 30% chance to call `_award_blueprint_fragment(building_drop_id(tier_id))`
+- `_on_craft_one()`: 20% chance to call `_award_blueprint_fragment(craft_drop_id(ref_id))`
+- `_complete_building()`: calls `_check_permit_awards()` after skyline.append; permit gating added to tier-advance check via `BuildDatabase.is_tier_unlocked(next_id)`
+- `_build_blueprints_panel()`: full-screen CanvasLayer 22 with header + ScrollContainer
+- `_update_blueprints_panel()`: rebuilds all 23 blueprint cards in 2-col grid per category + 4 permit cards; level dots, fragment bar, rarity colours, permit completion progress bar
+- `_award_blueprint_fragment(bp_id)`: adds 1 fragment, levels up on threshold, shows flash feedback
+- `_check_permit_awards()`: iterates PERMITS, counts skyline completions of unlock_tier, awards permit if ≥ required
+
+### Currently in progress / left mid-task
+Nothing — all functions implemented.
+
+### Next step
+1. Open Godot, confirm 0 parser errors
+2. Open BLUEPRINTS from MORE menu or quick bar — panel should show 4 category sections + permits
+3. Break a node — 15% chance; flash "Blueprint levelled up!" on threshold
+4. Complete 3 Two-Storey Houses — "Permit earned! Commercial Permit" flash; Apartment Block and Retail Unit now accessible
+5. Confirm permit wall shows for locked tiers (no permit yet) and bypasses once earned
+6. Commit once testing passes
+
+---
+
+## 2026-06-29 — Build section overhaul (IOM Obelisk-inspired)
+
+### Completed this session
+
+**Goal:** Make the BUILD section feel like a meaningful main goal rather than a passive side task.
+
+**BuildDatabase.gd**
+- Added `TIER_REWARDS` const dict — per-tier tables with `stage_cash_base`, `stage_gems`, `complete_cash`, `complete_gems`, `first_gems`, `income_per_min`
+  - Scales from Shed (100 cash/stage, 2/min income) to Skyscraper (80k cash/stage, 3000/min income)
+- Added `get_tier_rewards(tier_id) -> Dictionary` helper
+
+**GameState.gd**
+- Added `var first_completions: Array` (permanent; survives prestige)
+- Added `get_property_income_rate() -> float` — sums `income_per_min` for every tier in `skyline`
+
+**SaveManager.gd**
+- Saves/loads `first_completions` in `save_game` + `load_game` + `_init_fresh_state`
+- NOT reset in `prestige_reset()` (permanent like artifacts)
+
+**Main.gd**
+- New member vars: `_lbl_build_cooldown`, `_lbl_property_income`, `_property_income_accum`, `_build_panel_timer`
+- `_build_build_panel()`: added cooldown label (y=780, amber, replaces start button during cooldown) + property income label (y=960, dim, always visible when panel open)
+- `_process()`: calls `_tick_property_income(delta)`; refreshes cooldown label every second while build panel is open
+- `_complete_stage()`: scaled cash + gems from `TIER_REWARDS`; applies 10-min site prep cooldown (`stage_cooldown_until = now + 600`)
+- `_complete_building()`: scaled cash + gems; awards one-time `first_gems` bonus on tier's first-ever completion; appends to `first_completions`
+- `_on_start_stage_pressed()`: blocked if `stage_cooldown_until > now`
+- `_update_build_panel()`: shows cooldown label + countdown during site prep; property income rate always shown; buttons hidden during cooldown
+- `_tick_property_income(delta)`: accumulates fractional cash per frame, awards whole cash chunks, calls `_update_hud()`
+- `_refresh_build_cooldown_label()`: formats MM:SS countdown; auto-triggers `_update_build_panel()` when cooldown expires
+
+### Currently in progress / left mid-task
+Nothing — all 4 features implemented.
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Complete a stage — verify scaled reward (not flat 25–65 cash), check cooldown label appears with countdown
+3. Wait or temporarily reduce cooldown to 0 — verify start button returns
+4. Complete a full shed — verify bigger cash/gems reward; "⭐ First build bonus" flash on first-ever shed
+5. Build a second shed — confirm no first bonus the second time
+6. Check BUILD panel footer shows "🏘 Build your skyline..." or income rate once shed in skyline
+7. Commit once all checks pass

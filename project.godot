@@ -25,6 +25,7 @@ UpgradeDatabase="*res://scripts/autoload/UpgradeDatabase.gd"
 ArtifactDatabase="*res://scripts/autoload/ArtifactDatabase.gd"
 MissionManager="*res://scripts/autoload/MissionManager.gd"
 ToolboxDatabase="*res://scripts/autoload/ToolboxDatabase.gd"
+BlueprintDatabase="*res://scripts/autoload/BlueprintDatabase.gd"
 
 [display]
 
