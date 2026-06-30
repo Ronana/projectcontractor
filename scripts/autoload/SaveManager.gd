@@ -63,6 +63,13 @@ func save_game() -> void:
 		"permits":               GameState.permits,
 		# -- First completions (permanent) --
 		"first_completions":     GameState.first_completions,
+		# -- Site Inspections (permanent) --
+		"completed_inspections": GameState.completed_inspections,
+		# -- Trade Shows --
+		"trade_show_state":      GameState.trade_show_state,
+		# -- Skill tree --
+		"skill_points":          GameState.skill_points,
+		"skill_tree":            GameState.skill_tree,
 	}
 
 	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
@@ -135,7 +142,17 @@ func load_game() -> void:
 	GameState.blueprints          = d.get("blueprints", {})
 	GameState.permits             = d.get("permits",    [])
 	# -- First completions (permanent) --
-	GameState.first_completions   = d.get("first_completions", [])
+	GameState.first_completions      = d.get("first_completions", [])
+	# -- Site Inspections (permanent) --
+	GameState.completed_inspections  = d.get("completed_inspections", [])
+	# -- Trade Shows --
+	GameState.trade_show_state       = d.get("trade_show_state", {
+		"event_index": 0, "expires_at": 0.0,
+		"task_progress": {}, "claimed_rewards": [0, 0, 0],
+	})
+	# -- Skill tree --
+	GameState.skill_points           = int(d.get("skill_points", 0))
+	GameState.skill_tree             = d.get("skill_tree", {})
 
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
@@ -189,7 +206,14 @@ func _init_fresh_state() -> void:
 	GameState.active_boosts        = {}
 	GameState.blueprints           = {}
 	GameState.permits              = []
-	GameState.first_completions    = []
+	GameState.first_completions      = []
+	GameState.completed_inspections  = []
+	GameState.trade_show_state       = {
+		"event_index": 0, "expires_at": 0.0,
+		"task_progress": {}, "claimed_rewards": [0, 0, 0],
+	}
+	GameState.skill_points           = 0
+	GameState.skill_tree             = {}
 
 ## Reset all temporary state for a New Contract (prestige).
 ## rep_earned is added to the permanent reputation_points total.
@@ -212,6 +236,12 @@ func prestige_reset(rep_earned: int) -> void:
 	GameState.active_location_id = "lumber_yard"
 	GameState.location_nodes     = BuildDatabase.get_default_location_nodes()
 	GameState.upgrades           = {}
+	GameState.skill_points       = 0
+	GameState.skill_tree         = {}
+	GameState.trade_show_state   = {
+		"event_index": 0, "expires_at": 0.0,
+		"task_progress": {}, "claimed_rewards": [0, 0, 0],
+	}
 	save_game()
 
 func _default_building() -> Dictionary:

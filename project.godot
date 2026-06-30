@@ -26,6 +26,9 @@ ArtifactDatabase="*res://scripts/autoload/ArtifactDatabase.gd"
 MissionManager="*res://scripts/autoload/MissionManager.gd"
 ToolboxDatabase="*res://scripts/autoload/ToolboxDatabase.gd"
 BlueprintDatabase="*res://scripts/autoload/BlueprintDatabase.gd"
+SkillDatabase="*res://scripts/autoload/SkillDatabase.gd"
+InspectionDatabase="*res://scripts/autoload/InspectionDatabase.gd"
+TradeShowDatabase="*res://scripts/autoload/TradeShowDatabase.gd"
 
 [display]
 

@@ -39,6 +39,7 @@ const SHORTCUT_DEFS: Array = [
 	{"id": "missions",    "label": "MISSIONS",    "symbol": "M"},
 	{"id": "toolbox",     "label": "TOOLBOX",     "symbol": "T"},
 	{"id": "blueprints",  "label": "BLUEPRINTS",  "symbol": "📐"},
+	{"id": "tradeshow",   "label": "TRADE SHOW",  "symbol": "★"},
 ]
 
 # ── Colour palette ─────────────────────────────────────────────────────────
@@ -198,12 +199,20 @@ var _lbl_wall_title:  Label
 var _lbl_wall_detail: Label
 
 # ── Skyline panel refs ─────────────────────────────────────────────────────
-var _skyline_panel:    CanvasLayer
-var _skyline_list_box: VBoxContainer
+var _skyline_panel:      CanvasLayer
+var _skyline_list_box:   VBoxContainer
+var _lbl_skyline_stats:  Label
 
 # ── Upgrades panel refs ────────────────────────────────────────────────────
-var _upgrades_panel:     CanvasLayer
-var _upgrade_cards:      Array[Dictionary] = []  # {bg, bar, name_lbl, desc_lbl, level_lbl, cost_lbl, btn}
+var _upgrades_panel:          CanvasLayer
+var _upgrade_cards:           Array[Dictionary] = []
+var _upgrades_tab_active:     String = "general"
+var _btn_up_tab_general:      Button
+var _btn_up_tab_skills:       Button
+var _upgrades_scroll_general: ScrollContainer
+var _upgrades_scroll_skills:  ScrollContainer
+var _lbl_sp_count:            Label
+var _skill_cards:             Array = []  # Array of Dicts
 
 # ── Sell panel refs ────────────────────────────────────────────────────────
 var _sell_panel:       CanvasLayer
@@ -253,15 +262,25 @@ var _boost_strip:           CanvasLayer   # thin strip showing active boost time
 var _boost_chip_box:        HBoxContainer
 var _boost_strip_timer:     float = 0.0
 
+# ── Trade Show panel refs ────────────────────────────────────────────────────
+var _tradeshow_panel:       CanvasLayer
+var _lbl_ts_event_name:     Label
+var _lbl_ts_desc:           Label
+var _lbl_ts_timer:          Label
+var _ts_task_cards:         Array = []  # [{bar_fill, bar_bg, prog_lbl, done_icon}]
+var _ts_reward_cards:       Array = []  # [{outer, claim_btn, status_lbl}]
+var _ts_panel_timer:        float = 0.0  # seconds accumulator for timer refresh
+
 # ── Blueprints panel refs ───────────────────────────────────────────────────
 var _blueprints_panel:      CanvasLayer
 var _bp_scroll_content:     VBoxContainer   # rebuilt each time panel opens
 
 # ── Missions panel refs ─────────────────────────────────────────────────────
-var _missions_panel:      CanvasLayer
-var _mission_card_refs:   Array = []   # [{prog_bar, prog_lbl, claim_btn, mission_id}]
-var _lbl_daily_countdown: Label
-var _lbl_weekly_countdown: Label
+var _missions_panel:        CanvasLayer
+var _mission_card_refs:     Array = []   # [{prog_bar, prog_lbl, claim_btn, mission_id}]
+var _lbl_daily_countdown:   Label
+var _lbl_weekly_countdown:  Label
+var _inspection_card_refs:  Array = []   # [{outer, strip, title_lbl, desc_lbl, reward_lbl, done_lbl, id}]
 
 # ══════════════════════════════════════════════════════════════════════════
 # Lifecycle
@@ -290,6 +309,7 @@ func _ready() -> void:
 	_build_offline_popup()
 	_build_blueprints_panel()
 	_build_missions_panel()
+	_build_tradeshow_panel()
 	MissionManager.missions_changed.connect(_update_missions_panel)
 	_build_toolbox_panel()
 	_build_toolbox_float_btn()
@@ -330,6 +350,13 @@ func _process(delta: float) -> void:
 				_lbl_daily_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.daily_reset_at)
 			if _lbl_weekly_countdown:
 				_lbl_weekly_countdown.text = "Resets in %s" % MissionManager.time_until_string(GameState.weekly_reset_at)
+
+	# Refresh trade show timer every second while panel is open
+	if _tradeshow_panel and _tradeshow_panel.visible:
+		_ts_panel_timer += delta
+		if _ts_panel_timer >= 1.0:
+			_ts_panel_timer = 0.0
+			_refresh_ts_timer_label()
 
 	# Refresh build panel cooldown countdown every second while open
 	if _build_panel and _build_panel.visible:
@@ -1101,11 +1128,35 @@ func _build_menu_overlay() -> void:
 	dim_btn.pressed.connect(_on_menu_close)
 	_menu_overlay.add_child(dim_btn)
 
-	# Card — 3×3 grid + SHOP + "Edit Quick Bar" strip at bottom
+	# Card — 3-column grid + "Edit Quick Bar" strip at bottom
 	var card_w   := 680
-	var card_h   := 660
 	var card_x   := float(SCREEN_W - card_w) / 2.0
-	var card_y   := float(SCREEN_H - card_h) / 2.0
+
+	# Menu items — declare first so card height auto-fits item count
+	var items: Array = [
+		["MINE",       C_TIMBER,              _on_menu_mine],
+		["BUILD",      C_ACCENT,              _on_menu_build],
+		["CRAFT",      C_LUMBER,              _on_menu_craft],
+		["SELL",       C_GOLD,                _on_menu_sell],
+		["CREW",       C_GREEN,               _on_menu_crew],
+		["SKYLINE",    C_STONE,               _on_menu_skyline],
+		["UPGRADES",   C_XP,                  _on_menu_upgrades],
+		["CONTRACT",   C_GOLD,                _on_menu_contract],
+		["SHOP",       C_GEM,                 _on_shop_btn_pressed],
+		["MISSIONS",   C_GOLD,                _on_menu_missions],
+		["TOOLBOX",    Color(0.9, 0.5, 0.2),  _on_menu_toolbox],
+		["BLUEPRINTS", Color(0.4, 0.85, 1.0), _on_menu_blueprints],
+		["TRADE SHOW", Color(1.0, 0.85, 0.2), _on_menu_tradeshow],
+	]
+	var cols      := 3
+	var rows      := ceili(float(items.size()) / float(cols))
+	var pad       := 16
+	# Reserve 72 px at bottom for the Edit Bar strip
+	var edit_zone := 72
+	var item_h    := 110
+	var card_h    := 60 + pad * (rows + 1) + rows * item_h + edit_zone
+	var card_y    := float(SCREEN_H - card_h) / 2.0
+	var item_w    := float(card_w - pad * (cols + 1)) / float(cols)
 
 	var card      := ColorRect.new()
 	card.color     = C_PANEL
@@ -1118,29 +1169,6 @@ func _build_menu_overlay() -> void:
 	card_top.position  = Vector2(card_x, card_y)
 	card_top.size      = Vector2(card_w, 4)
 	_menu_overlay.add_child(card_top)
-
-	# Menu items: 3 columns × 4 rows (MINE + 9 shortcuts = 10, padded to 12)
-	var items: Array = [
-		["MINE",     C_TIMBER,  _on_menu_mine],
-		["BUILD",    C_ACCENT,  _on_menu_build],
-		["CRAFT",    C_LUMBER,  _on_menu_craft],
-		["SELL",     C_GOLD,    _on_menu_sell],
-		["CREW",     C_GREEN,   _on_menu_crew],
-		["SKYLINE",  C_STONE,   _on_menu_skyline],
-		["UPGRADES", C_XP,      _on_menu_upgrades],
-		["CONTRACT", C_GOLD,    _on_menu_contract],
-		["SHOP",     C_GEM,     _on_shop_btn_pressed],
-		["MISSIONS",   C_GOLD,              _on_menu_missions],
-		["TOOLBOX",    Color(0.9, 0.5, 0.2), _on_menu_toolbox],
-		["BLUEPRINTS", Color(0.4, 0.85, 1.0), _on_menu_blueprints],
-	]
-	var cols      := 3
-	var rows      := 4
-	var pad       := 16
-	# Reserve 72 px at bottom for the Edit Bar strip
-	var edit_zone := 72
-	var item_w    := float(card_w - pad * (cols + 1)) / float(cols)
-	var item_h    := float(card_h - 60 - pad * (rows + 1) - edit_zone) / float(rows)
 
 	for i in items.size():
 		var col     := i % cols
@@ -2068,17 +2096,19 @@ func _build_skyline_panel() -> void:
 	var close_btn := _build_panel_header(_skyline_panel, "SKYLINE", C_GOLD)
 	close_btn.pressed.connect(_on_skyline_close)
 
-	var sub      := Label.new()
-	sub.text      = "All completed buildings:"
-	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.position  = Vector2(0, 86)
-	sub.size      = Vector2(SCREEN_W, 34)
-	sub.add_theme_color_override("font_color", C_DIM)
-	_skyline_panel.add_child(sub)
+	_lbl_skyline_stats                      = Label.new()
+	_lbl_skyline_stats.text                 = ""
+	_lbl_skyline_stats.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_skyline_stats.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
+	_lbl_skyline_stats.position             = Vector2(16, 82)
+	_lbl_skyline_stats.size                 = Vector2(SCREEN_W - 32, 44)
+	_lbl_skyline_stats.add_theme_font_size_override("font_size", 13)
+	_lbl_skyline_stats.add_theme_color_override("font_color", C_DIM)
+	_skyline_panel.add_child(_lbl_skyline_stats)
 
 	var scroll      := ScrollContainer.new()
-	scroll.position  = Vector2(0, 128)
-	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 128 - 90)
+	scroll.position  = Vector2(0, 134)
+	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 134 - 90)
 	_skyline_panel.add_child(scroll)
 
 	_skyline_list_box          = VBoxContainer.new()
@@ -2263,33 +2293,56 @@ func _build_upgrades_panel() -> void:
 	var close_btn := _build_panel_header(_upgrades_panel, "UPGRADES", C_XP)
 	close_btn.pressed.connect(_on_upgrades_close)
 
-	var sub      := Label.new()
-	sub.text      = "Unlocked by player level  ·  costs multiply ×2 per level"
+	# ── Tab row ──────────────────────────────────────────────────────────────
+	_btn_up_tab_general = Button.new()
+	_btn_up_tab_general.text     = "GENERAL"
+	_btn_up_tab_general.position = Vector2(8, 82)
+	_btn_up_tab_general.size     = Vector2(348, 42)
+	_btn_up_tab_general.pressed.connect(_on_upgrades_tab.bind("general"))
+	_apply_btn_style(_btn_up_tab_general, C_XP.darkened(0.25))
+	_upgrades_panel.add_child(_btn_up_tab_general)
+
+	_btn_up_tab_skills = Button.new()
+	_btn_up_tab_skills.text     = "SKILLS"
+	_btn_up_tab_skills.position = Vector2(364, 82)
+	_btn_up_tab_skills.size     = Vector2(348, 42)
+	_btn_up_tab_skills.pressed.connect(_on_upgrades_tab.bind("skills"))
+	_apply_btn_style(_btn_up_tab_skills, C_XP.darkened(0.50))
+	_upgrades_panel.add_child(_btn_up_tab_skills)
+
+	const CONTENT_Y := 130
+
+	# ── GENERAL scroll ───────────────────────────────────────────────────────
+	_upgrades_scroll_general = ScrollContainer.new()
+	_upgrades_scroll_general.position = Vector2(0, CONTENT_Y)
+	_upgrades_scroll_general.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - CONTENT_Y)
+	_upgrades_panel.add_child(_upgrades_scroll_general)
+
+	var list := VBoxContainer.new()
+	list.name = "UpgradeList"
+	list.custom_minimum_size = Vector2(SCREEN_W, 0)
+	_upgrades_scroll_general.add_child(list)
+
+	var sub := Label.new()
+	sub.text     = "Unlocked by player level  ·  costs multiply ×2 per level"
 	sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	sub.position  = Vector2(0, 84)
-	sub.size      = Vector2(SCREEN_W, 28)
+	sub.custom_minimum_size  = Vector2(SCREEN_W, 32)
 	sub.add_theme_font_size_override("font_size", 12)
 	sub.add_theme_color_override("font_color", C_DIM)
-	_upgrades_panel.add_child(sub)
+	list.add_child(sub)
 
-	# Scrollable area for cards
-	var scroll      := ScrollContainer.new()
-	scroll.position  = Vector2(0, 116)
-	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 116)
-	_upgrades_panel.add_child(scroll)
-
-	var list      := VBoxContainer.new()
-	list.name      = "UpgradeList"
-	list.position  = Vector2.ZERO
-	list.size      = Vector2(SCREEN_W, 0)
-	scroll.add_child(list)
-
-	# Build one card per upgrade definition
 	var all_upgrades := UpgradeDatabase.get_all()
-	for i in all_upgrades.size():
-		var u: Dictionary = all_upgrades[i]
-		var card := _build_upgrade_card(list, u)
-		_upgrade_cards.append(card)
+	for u: Dictionary in all_upgrades:
+		_upgrade_cards.append(_build_upgrade_card(list, u))
+
+	# ── SKILLS scroll ────────────────────────────────────────────────────────
+	_upgrades_scroll_skills = ScrollContainer.new()
+	_upgrades_scroll_skills.position = Vector2(0, CONTENT_Y)
+	_upgrades_scroll_skills.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - CONTENT_Y)
+	_upgrades_scroll_skills.visible  = false
+	_upgrades_panel.add_child(_upgrades_scroll_skills)
+
+	_build_skills_tab(_upgrades_scroll_skills)
 
 func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	var accent := C_XP
@@ -2376,6 +2429,196 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 		"cost_lbl":   cost_lbl,
 		"btn":        btn,
 	}
+
+# ── Skills tab builder ─────────────────────────────────────────────────────
+
+func _build_skills_tab(scroll: ScrollContainer) -> void:
+	var outer_vbox := VBoxContainer.new()
+	outer_vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	outer_vbox.add_theme_constant_override("separation", 0)
+	scroll.add_child(outer_vbox)
+
+	# SP counter row
+	var sp_bg := ColorRect.new()
+	sp_bg.color = Color(0.12, 0.10, 0.20)
+	sp_bg.custom_minimum_size = Vector2(SCREEN_W, 44)
+	outer_vbox.add_child(sp_bg)
+
+	_lbl_sp_count = Label.new()
+	_lbl_sp_count.text = "Skill Points available: 0"
+	_lbl_sp_count.position = Vector2(0, 10)
+	_lbl_sp_count.size     = Vector2(SCREEN_W, 26)
+	_lbl_sp_count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_lbl_sp_count.add_theme_font_size_override("font_size", 15)
+	_lbl_sp_count.add_theme_color_override("font_color", C_XP)
+	sp_bg.add_child(_lbl_sp_count)
+
+	# 3-column branch layout
+	var hbox := HBoxContainer.new()
+	hbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	hbox.add_theme_constant_override("separation", 0)
+	outer_vbox.add_child(hbox)
+
+	for branch_id: String in SkillDatabase.BRANCH_ORDER:
+		hbox.add_child(_build_branch_column(branch_id))
+
+func _build_branch_column(branch_id: String) -> VBoxContainer:
+	var col_w: int  = SCREEN_W / 3   # 240 px
+	var bc: Color   = SkillDatabase.BRANCH_COLORS[branch_id]
+	var b_name: String = SkillDatabase.BRANCH_NAMES[branch_id]
+	var b_sub: String  = SkillDatabase.BRANCH_SUBTITLES[branch_id]
+
+	var col := VBoxContainer.new()
+	col.custom_minimum_size = Vector2(col_w, 0)
+	col.add_theme_constant_override("separation", 0)
+
+	# Branch header
+	var header := ColorRect.new()
+	header.color = bc.darkened(0.62)
+	header.custom_minimum_size = Vector2(col_w, 56)
+	col.add_child(header)
+
+	var accent_top := ColorRect.new()
+	accent_top.color    = bc
+	accent_top.position = Vector2.ZERO
+	accent_top.size     = Vector2(col_w, 4)
+	header.add_child(accent_top)
+
+	var lbl_n := Label.new()
+	lbl_n.text = b_name
+	lbl_n.position = Vector2(2, 8)
+	lbl_n.size     = Vector2(col_w - 4, 22)
+	lbl_n.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_n.add_theme_font_size_override("font_size", 13)
+	lbl_n.add_theme_color_override("font_color", bc)
+	header.add_child(lbl_n)
+
+	var lbl_s := Label.new()
+	lbl_s.text = b_sub
+	lbl_s.position = Vector2(2, 32)
+	lbl_s.size     = Vector2(col_w - 4, 18)
+	lbl_s.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	lbl_s.add_theme_font_size_override("font_size", 9)
+	lbl_s.add_theme_color_override("font_color", C_DIM)
+	lbl_s.clip_text = true
+	header.add_child(lbl_s)
+
+	# Skill cards
+	var skills := SkillDatabase.get_branch(branch_id)
+	for i in skills.size():
+		var s: Dictionary = skills[i]
+		_skill_cards.append(_build_skill_card(col, s, bc, col_w))
+		if i < skills.size() - 1:
+			var arrow := Label.new()
+			arrow.text = "▼"
+			arrow.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			arrow.custom_minimum_size  = Vector2(col_w, 16)
+			arrow.add_theme_font_size_override("font_size", 9)
+			arrow.add_theme_color_override("font_color", C_BORDER)
+			col.add_child(arrow)
+
+	return col
+
+func _build_skill_card(parent: VBoxContainer, s: Dictionary, bc: Color, col_w: int) -> Dictionary:
+	var outer := ColorRect.new()
+	outer.color = C_CARD
+	outer.custom_minimum_size = Vector2(col_w, 92)
+	parent.add_child(outer)
+
+	var state_bar := ColorRect.new()
+	state_bar.position = Vector2.ZERO
+	state_bar.size     = Vector2(3, 92)
+	state_bar.color    = C_BORDER
+	outer.add_child(state_bar)
+
+	var name_lbl := Label.new()
+	name_lbl.text     = s["name"]
+	name_lbl.position = Vector2(7, 5)
+	name_lbl.size     = Vector2(col_w - 10, 20)
+	name_lbl.add_theme_font_size_override("font_size", 11)
+	name_lbl.add_theme_color_override("font_color", bc)
+	name_lbl.clip_text = true
+	outer.add_child(name_lbl)
+
+	var desc_lbl := Label.new()
+	desc_lbl.text     = s["desc"]
+	desc_lbl.position = Vector2(7, 25)
+	desc_lbl.size     = Vector2(col_w - 10, 18)
+	desc_lbl.add_theme_font_size_override("font_size", 10)
+	desc_lbl.add_theme_color_override("font_color", C_DIM)
+	desc_lbl.clip_text = true
+	outer.add_child(desc_lbl)
+
+	var cost_lbl := Label.new()
+	cost_lbl.text     = "1 SP"
+	cost_lbl.position = Vector2(7, 44)
+	cost_lbl.size     = Vector2(col_w - 10, 18)
+	cost_lbl.add_theme_font_size_override("font_size", 10)
+	cost_lbl.add_theme_color_override("font_color", C_GOLD)
+	outer.add_child(cost_lbl)
+
+	var btn := Button.new()
+	btn.text     = "BUY"
+	btn.position = Vector2(4, 64)
+	btn.size     = Vector2(col_w - 8, 24)
+	btn.pressed.connect(_on_skill_buy.bind(s["id"]))
+	_apply_btn_style(btn, bc.darkened(0.50))
+	outer.add_child(btn)
+
+	return {"id": s["id"], "outer": outer, "state_bar": state_bar,
+			"name_lbl": name_lbl, "desc_lbl": desc_lbl, "cost_lbl": cost_lbl, "btn": btn}
+
+func _update_skills_tab() -> void:
+	if _lbl_sp_count:
+		_lbl_sp_count.text = "Skill Points available: %d" % GameState.skill_points
+	for card: Dictionary in _skill_cards:
+		var sid: String = card["id"]
+		var s           := SkillDatabase.get_skill(sid)
+		var bc: Color   = SkillDatabase.BRANCH_COLORS[s["branch"]]
+		var purchased   := bool(GameState.skill_tree.get(sid, false))
+		var can_buy     := SkillDatabase.can_purchase(sid, GameState.skill_tree, GameState.skill_points)
+
+		(card["btn"] as Button).disabled = purchased or not can_buy
+
+		if purchased:
+			(card["state_bar"] as ColorRect).color = bc
+			(card["cost_lbl"] as Label).text = "✓ Learned"
+			(card["cost_lbl"] as Label).add_theme_color_override("font_color", C_GREEN)
+			(card["btn"] as Button).text = "Done"
+		elif can_buy:
+			(card["state_bar"] as ColorRect).color = bc.darkened(0.30)
+			(card["cost_lbl"] as Label).text = "1 SP"
+			(card["cost_lbl"] as Label).add_theme_color_override("font_color", C_GOLD)
+			(card["btn"] as Button).text = "BUY"
+		else:
+			(card["state_bar"] as ColorRect).color = C_BORDER
+			var req: String = s.get("requires", "")
+			if req != "" and not bool(GameState.skill_tree.get(req, false)):
+				(card["cost_lbl"] as Label).text = "Locked"
+			else:
+				(card["cost_lbl"] as Label).text = "Need SP"
+			(card["cost_lbl"] as Label).add_theme_color_override("font_color", C_DIM)
+			(card["btn"] as Button).text = "—"
+
+func _on_upgrades_tab(tab: String) -> void:
+	_upgrades_tab_active = tab
+	_upgrades_scroll_general.visible = (tab == "general")
+	_upgrades_scroll_skills.visible  = (tab == "skills")
+	_apply_btn_style(_btn_up_tab_general,
+		C_XP.darkened(0.25) if tab == "general" else C_XP.darkened(0.55))
+	_apply_btn_style(_btn_up_tab_skills,
+		C_XP.darkened(0.25) if tab == "skills" else C_XP.darkened(0.55))
+	if tab == "skills":
+		_update_skills_tab()
+
+func _on_skill_buy(skill_id: String) -> void:
+	if not SkillDatabase.can_purchase(skill_id, GameState.skill_tree, GameState.skill_points):
+		return
+	var s := SkillDatabase.get_skill(skill_id)
+	GameState.skill_points -= int(s.get("cost_sp", 1))
+	GameState.skill_tree[skill_id] = true
+	_update_skills_tab()
+	_flash_feedback("Skill: %s!" % s["name"])
 
 # ── Contract panel ─────────────────────────────────────────────────────────
 func _build_contract_panel() -> void:
@@ -2851,6 +3094,7 @@ func _close_all_panels() -> void:
 	_shop_panel.visible            = false
 	_missions_panel.visible        = false
 	_blueprints_panel.visible      = false
+	_tradeshow_panel.visible       = false
 	_toolbox_panel.visible         = false
 	_menu_overlay.visible          = false
 	_loc_picker_panel.visible      = false
@@ -2880,6 +3124,7 @@ func _shortcut_color(id: String) -> Color:
 		"missions":   return C_GOLD
 		"toolbox":    return Color(0.90, 0.50, 0.20)
 		"blueprints": return Color(0.40, 0.85, 1.00)
+		"tradeshow":  return Color(1.00, 0.85, 0.20)
 		_:            return C_DIM
 
 ## Return the SHORTCUT_DEFS entry for id, or empty dict if not found.
@@ -2903,6 +3148,7 @@ func _on_shortcut_pressed(id: String) -> void:
 		"missions":   _on_menu_missions()
 		"toolbox":    _on_menu_toolbox()
 		"blueprints": _on_menu_blueprints()
+		"tradeshow":  _on_menu_tradeshow()
 		"mine":        _on_menu_mine()
 
 ## Open the pin customiser panel (called from the "Edit Quick Bar" button).
@@ -3006,6 +3252,8 @@ func _on_menu_upgrades() -> void:
 	_close_all_panels()
 	_upgrades_panel.visible = true
 	_update_upgrades_panel()
+	if _upgrades_tab_active == "skills":
+		_update_skills_tab()
 
 func _on_upgrades_close() -> void:
 	_upgrades_panel.visible = false
@@ -3150,6 +3398,8 @@ func _update_upgrades_panel() -> void:
 				"font_color", C_GOLD if can_afford else C_RED)
 			(card["btn"] as Button).disabled = not can_afford
 			(card["btn"] as Button).text     = "Buy"
+	if _upgrades_tab_active == "skills":
+		_update_skills_tab()
 
 func _on_shop_btn_pressed() -> void:
 	var opening := not _shop_panel.visible
@@ -3227,6 +3477,7 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	GameState.materials[mat] = GameState.materials.get(mat, 0) + total_drop
 	MissionManager.add_progress("collect_mat", mat, total_drop)
 	MissionManager.add_progress("break_nodes", "", 1)
+	_ts_progress("break_nodes", 1, "")
 	_gain_xp(total_xp)
 	# 15% chance: award a material blueprint fragment
 	if randf() < 0.15:
@@ -3296,7 +3547,8 @@ func _on_level_up() -> void:
 				break
 		if needs_upgrade:
 			_spawn_wave(loc_id)
-	_flash_feedback("LEVEL UP!   Lv. %d" % GameState.player_level)
+	GameState.skill_points += 1
+	_flash_feedback("LEVEL UP!  Lv.%d  (+1 SP)" % GameState.player_level)
 	_update_hud()
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -3346,9 +3598,13 @@ func _on_start_stage_pressed() -> void:
 	for mat: String in stage.required_materials:
 		var need: int = int(stage.required_materials[mat])
 		GameState.materials[mat] = GameState.materials.get(mat, 0) - need
-	# Start the stage
+	# Start the stage — record build start timestamp on the very first stage
 	GameState.current_building["stage_started"]  = true
 	GameState.current_building["stage_progress"] = 0.0
+	if GameState.current_building.get("stage_index", 0) == 0 \
+			and not GameState.current_building.has("build_started_at"):
+		GameState.current_building["build_started_at"] = Time.get_unix_time_from_system()
+		GameState.current_building["gem_skips_used"]   = 0
 	_update_build_panel()
 
 func _on_tap_build() -> void:
@@ -3399,6 +3655,7 @@ func _complete_stage() -> void:
 	GameState.cash += reward
 	GameState.gems += gem_reward
 	MissionManager.add_progress("complete_stages", "", 1)
+	_ts_progress("earn_stage_cash", reward, "")
 	# 30% chance: award a building blueprint fragment on stage complete
 	if randf() < 0.30:
 		_award_blueprint_fragment(BlueprintDatabase.building_drop_id(tier_id))
@@ -3435,8 +3692,16 @@ func _complete_building() -> void:
 		first_bonus_gems = int(rewards.get("first_gems", 0))
 		GameState.gems  += first_bonus_gems
 
+	# Track trade show progress
+	_ts_progress("complete_builds_any", 1, tier_id)
+	_ts_progress("complete_tier_min",   1, tier_id)
+	# Check site inspection conditions
+	_check_inspections(tier_id)
 	# Check if any permit is now earned based on completion counts
 	_check_permit_awards()
+	# Refresh Skyline panel live if it's open
+	if _skyline_panel and _skyline_panel.visible:
+		_update_skyline_panel()
 
 	var base_msg   := "Building complete!  +%s  +%d 💎" % [_fmt(cash_reward), gem_reward]
 	var bonus_line := ""
@@ -3584,37 +3849,146 @@ func _update_skyline_panel() -> void:
 	for child in _skyline_list_box.get_children():
 		child.queue_free()
 
+	# ── Stats summary ────────────────────────────────────────────────────────
+	var income_rate  := GameState.get_property_income_rate()
+	var portfolio_ct := GameState.portfolio.size()
 	if GameState.skyline.is_empty():
-		var empty_lbl     := Label.new()
-		empty_lbl.text     = "Nothing built yet.\nComplete a building to see it here."
-		empty_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		empty_lbl.autowrap_mode        = TextServer.AUTOWRAP_WORD_SMART
-		empty_lbl.custom_minimum_size  = Vector2(SCREEN_W, 80)
+		_lbl_skyline_stats.text = "Nothing built this contract yet."
+	else:
+		var stats_line := "%d buildings  •  +%s/min income" \
+			% [GameState.skyline.size(), _fmt(int(income_rate))]
+		if portfolio_ct > 0:
+			stats_line += "\nAll-time portfolio: %d buildings" % (portfolio_ct + GameState.skyline.size())
+		_lbl_skyline_stats.text = stats_line
+
+	# ── Empty state ──────────────────────────────────────────────────────────
+	if GameState.skyline.is_empty():
+		var empty_lbl                    := Label.new()
+		empty_lbl.text                    = "Nothing built yet.\nComplete a building to see it here."
+		empty_lbl.horizontal_alignment    = HORIZONTAL_ALIGNMENT_CENTER
+		empty_lbl.autowrap_mode           = TextServer.AUTOWRAP_WORD_SMART
+		empty_lbl.custom_minimum_size     = Vector2(SCREEN_W, 120)
+		empty_lbl.add_theme_font_size_override("font_size", 15)
 		empty_lbl.add_theme_color_override("font_color", C_DIM)
 		_skyline_list_box.add_child(empty_lbl)
 		return
 
-	for entry: String in GameState.skyline:
-		var tier := BuildDatabase.get_tier(entry)
-		var row  := HBoxContainer.new()
-		row.custom_minimum_size = Vector2(SCREEN_W, 72)
-		_skyline_list_box.add_child(row)
+	# ── Group skyline by tier (preserving first-seen order) ─────────────────
+	var tier_counts: Dictionary = {}
+	var tier_order_seen: Array  = []
+	for tier_id: String in GameState.skyline:
+		tier_counts[tier_id] = tier_counts.get(tier_id, 0) + 1
+		if not tier_order_seen.has(tier_id):
+			tier_order_seen.append(tier_id)
 
-		var swatch      := ColorRect.new()
-		swatch.color     = _tier_colour(entry)
-		swatch.custom_minimum_size = Vector2(56, 56)
-		row.add_child(swatch)
+	# ── Build a card per unique tier ─────────────────────────────────────────
+	const CARD_H  := 92
+	const CARD_M  := 8   # margin each side
+	const BAR_W   := 5   # accent bar width
 
-		var spacer      := Control.new()
-		spacer.custom_minimum_size = Vector2(12, 0)
-		row.add_child(spacer)
+	for tier_id: String in tier_order_seen:
+		var tier            := BuildDatabase.get_tier(tier_id)
+		var count: int       = tier_counts[tier_id]
+		var rewards          := BuildDatabase.get_tier_rewards(tier_id)
+		var income_per: int  = int(rewards.get("income_per_min", 0))
+		var total_income     := income_per * count
+		var accent           := _tier_colour(tier_id)
+		var tier_idx: int    = BuildDatabase.TIER_ORDER.find(tier_id) + 1
+		var has_first: bool  = GameState.first_completions.has(tier_id)
+		var name: String     = tier.display_name if tier else tier_id
 
-		var lbl      := Label.new()
-		lbl.text      = tier.display_name if tier else entry
-		lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		lbl.custom_minimum_size  = Vector2(580, 56)
-		lbl.add_theme_color_override("font_color", C_TEXT)
-		row.add_child(lbl)
+		# Card root
+		var card                   := Control.new()
+		card.custom_minimum_size    = Vector2(SCREEN_W, CARD_H)
+		_skyline_list_box.add_child(card)
+
+		# Card background
+		var bg          := ColorRect.new()
+		bg.color         = C_CARD
+		bg.position      = Vector2(CARD_M, 4)
+		bg.size          = Vector2(SCREEN_W - CARD_M * 2, CARD_H - 8)
+		card.add_child(bg)
+
+		# Tier-colour left accent bar
+		var bar          := ColorRect.new()
+		bar.color         = accent
+		bar.position      = Vector2(CARD_M, 4)
+		bar.size          = Vector2(BAR_W, CARD_H - 8)
+		card.add_child(bar)
+
+		# Building name
+		var name_lbl                      := Label.new()
+		name_lbl.text                      = name
+		name_lbl.position                  = Vector2(CARD_M + BAR_W + 10, 10)
+		name_lbl.size                      = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 16, 28)
+		name_lbl.add_theme_font_size_override("font_size", 17)
+		name_lbl.add_theme_color_override("font_color", C_TEXT)
+		card.add_child(name_lbl)
+
+		# ×count badge (right-aligned, tier colour)
+		if count > 1:
+			var ct_lbl                      := Label.new()
+			ct_lbl.text                      = "×%d" % count
+			ct_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_RIGHT
+			ct_lbl.position                  = Vector2(CARD_M + BAR_W + 10, 10)
+			ct_lbl.size                      = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 20, 28)
+			ct_lbl.add_theme_font_size_override("font_size", 17)
+			ct_lbl.add_theme_color_override("font_color", accent)
+			card.add_child(ct_lbl)
+
+		# Tier number · income (left, dim)
+		var sub_lbl                       := Label.new()
+		sub_lbl.text                       = "Tier %d" % tier_idx
+		if total_income > 0:
+			sub_lbl.text += "  •  +%s / min" % _fmt(total_income)
+		sub_lbl.position                   = Vector2(CARD_M + BAR_W + 10, 44)
+		sub_lbl.size                       = Vector2(400, 22)
+		sub_lbl.add_theme_font_size_override("font_size", 13)
+		sub_lbl.add_theme_color_override("font_color", C_DIM)
+		card.add_child(sub_lbl)
+
+		# ⭐ First build badge (right side, gold)
+		if has_first:
+			var first_lbl                   := Label.new()
+			first_lbl.text                   = "⭐ First build"
+			first_lbl.horizontal_alignment   = HORIZONTAL_ALIGNMENT_RIGHT
+			first_lbl.position               = Vector2(CARD_M + BAR_W + 10, 44)
+			first_lbl.size                   = Vector2(SCREEN_W - CARD_M * 2 - BAR_W - 20, 22)
+			first_lbl.add_theme_font_size_override("font_size", 13)
+			first_lbl.add_theme_color_override("font_color", C_GOLD)
+			card.add_child(first_lbl)
+
+		# Built-in-progress indicator (if this is the current tier)
+		var cur_tier_id: String = GameState.current_building.get("tier_id", "")
+		if cur_tier_id == tier_id:
+			var prog_lbl                    := Label.new()
+			prog_lbl.text                    = "🔨 Building now…"
+			prog_lbl.position                = Vector2(CARD_M + BAR_W + 10, 64)
+			prog_lbl.size                    = Vector2(400, 20)
+			prog_lbl.add_theme_font_size_override("font_size", 12)
+			prog_lbl.add_theme_color_override("font_color", C_ACCENT)
+			card.add_child(prog_lbl)
+
+	# ── Portfolio footer (if any previous contracts) ─────────────────────────
+	if portfolio_ct > 0:
+		var spacer                   := Control.new()
+		spacer.custom_minimum_size    = Vector2(0, 16)
+		_skyline_list_box.add_child(spacer)
+
+		var div          := ColorRect.new()
+		div.color         = C_BORDER
+		div.custom_minimum_size = Vector2(SCREEN_W - 32, 1)
+		_skyline_list_box.add_child(div)
+
+		var port_lbl                      := Label.new()
+		port_lbl.text                      = "All-time portfolio: %d buildings across %d contracts" \
+			% [portfolio_ct + GameState.skyline.size(), GameState.contract_count + 1]
+		port_lbl.horizontal_alignment      = HORIZONTAL_ALIGNMENT_CENTER
+		port_lbl.autowrap_mode             = TextServer.AUTOWRAP_WORD_SMART
+		port_lbl.custom_minimum_size       = Vector2(SCREEN_W - 32, 44)
+		port_lbl.add_theme_font_size_override("font_size", 13)
+		port_lbl.add_theme_color_override("font_color", C_DIM)
+		_skyline_list_box.add_child(port_lbl)
 
 # ── Craft panel interaction ─────────────────────────────────────────────────
 func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
@@ -3678,6 +4052,9 @@ func _on_stage_skip_pressed() -> void:
 		return
 	GameState.gems -= 10
 	GameState.current_building["stage_progress"] = 1.0
+	# Track gem skips for inspection conditions
+	GameState.current_building["gem_skips_used"] = \
+		int(GameState.current_building.get("gem_skips_used", 0)) + 1
 	_shop_panel.visible = false
 	_complete_stage()
 
@@ -3725,6 +4102,20 @@ func _build_missions_panel() -> void:
 
 	for i in MissionManager.WEEKLY_COUNT:
 		_mission_card_refs.append(_make_mission_card(vbox, false, i))
+
+	# ── Site Inspections section ─────────────────────────────────────────────
+	_make_mission_section_header(vbox, "SITE INSPECTIONS", C_GREEN)
+
+	var insp_sub := Label.new()
+	insp_sub.text = "Permanent challenges — earn Blueprint fragments & gems. Survive prestige."
+	insp_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	insp_sub.custom_minimum_size  = Vector2(SCREEN_W, 32)
+	insp_sub.add_theme_font_size_override("font_size", 11)
+	insp_sub.add_theme_color_override("font_color", C_DIM)
+	vbox.add_child(insp_sub)
+
+	for insp: Dictionary in InspectionDatabase.get_all():
+		_inspection_card_refs.append(_make_inspection_card(vbox, insp))
 
 	# Bottom padding
 	var pad      := Control.new()
@@ -3849,6 +4240,98 @@ func _make_mission_card(parent: VBoxContainer, is_daily: bool, slot_idx: int) ->
 	claim_btn.pressed.connect(func() -> void: _on_mission_claim(refs))
 	return refs
 
+func _make_inspection_card(parent: VBoxContainer, insp: Dictionary) -> Dictionary:
+	var done: bool = GameState.completed_inspections.has(insp["id"])
+
+	var card := ColorRect.new()
+	card.color = C_CARD
+	card.custom_minimum_size = Vector2(SCREEN_W, 90)
+	parent.add_child(card)
+
+	# Accent strip: green if done, dim if pending
+	var strip := ColorRect.new()
+	strip.position = Vector2.ZERO
+	strip.size     = Vector2(5, 90)
+	strip.color    = C_GREEN if done else C_BORDER
+	card.add_child(strip)
+
+	# Separator
+	var sep := ColorRect.new()
+	sep.color    = C_BORDER
+	sep.position = Vector2(5, 88)
+	sep.size     = Vector2(SCREEN_W - 5, 2)
+	card.add_child(sep)
+
+	# Tier badge (small coloured chip)
+	var tier_lbl := Label.new()
+	tier_lbl.text = BuildDatabase.get_tier(insp["tier_id"]).display_name \
+		if BuildDatabase.get_tier(insp["tier_id"]) else insp["tier_id"]
+	tier_lbl.position = Vector2(16, 6)
+	tier_lbl.size     = Vector2(280, 20)
+	tier_lbl.add_theme_font_size_override("font_size", 11)
+	tier_lbl.add_theme_color_override("font_color", C_DIM)
+	card.add_child(tier_lbl)
+
+	# Inspection name
+	var title_lbl := Label.new()
+	title_lbl.text     = insp.get("name", "")
+	title_lbl.position = Vector2(16, 24)
+	title_lbl.size     = Vector2(440, 26)
+	title_lbl.add_theme_font_size_override("font_size", 15)
+	title_lbl.add_theme_color_override("font_color", C_GREEN if done else C_TEXT)
+	card.add_child(title_lbl)
+
+	# Description
+	var desc_lbl := Label.new()
+	desc_lbl.text          = insp.get("desc", "")
+	desc_lbl.position      = Vector2(16, 50)
+	desc_lbl.size          = Vector2(SCREEN_W - 220, 32)
+	desc_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	desc_lbl.add_theme_font_size_override("font_size", 11)
+	desc_lbl.add_theme_color_override("font_color", C_DIM)
+	card.add_child(desc_lbl)
+
+	# Reward label (top right)
+	var reward_lbl := Label.new()
+	var frags: int = int(insp.get("reward_fragments", 0))
+	var gems: int  = int(insp.get("reward_gems", 0))
+	reward_lbl.text               = "+%d frags  +%d 💎" % [frags, gems]
+	reward_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	reward_lbl.position           = Vector2(SCREEN_W - 210, 6)
+	reward_lbl.size               = Vector2(194, 22)
+	reward_lbl.add_theme_font_size_override("font_size", 12)
+	reward_lbl.add_theme_color_override("font_color", C_GOLD if not done else C_DIM)
+	card.add_child(reward_lbl)
+
+	# Done badge (bottom right)
+	var done_lbl := Label.new()
+	done_lbl.text               = "✓ PASSED" if done else ""
+	done_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	done_lbl.position           = Vector2(SCREEN_W - 210, 56)
+	done_lbl.size               = Vector2(194, 26)
+	done_lbl.add_theme_font_size_override("font_size", 13)
+	done_lbl.add_theme_color_override("font_color", C_GREEN)
+	card.add_child(done_lbl)
+
+	return {
+		"id":         insp["id"],
+		"strip":      strip,
+		"title_lbl":  title_lbl,
+		"done_lbl":   done_lbl,
+		"reward_lbl": reward_lbl,
+	}
+
+func _update_inspections_section() -> void:
+	for card: Dictionary in _inspection_card_refs:
+		var iid: String = card["id"]
+		var done: bool  = GameState.completed_inspections.has(iid)
+		(card["strip"]      as ColorRect).color = C_GREEN if done else C_BORDER
+		(card["title_lbl"]  as Label).add_theme_color_override(
+			"font_color", C_GREEN if done else C_TEXT)
+		(card["done_lbl"]   as Label).text = "✓ PASSED" if done else ""
+		(card["reward_lbl"] as Label).add_theme_color_override(
+			"font_color", C_DIM if done else C_GOLD)
+
 func _update_missions_panel() -> void:
 	if not _missions_panel:
 		return
@@ -3904,12 +4387,419 @@ func _on_mission_claim(refs: Dictionary) -> void:
 func _on_menu_missions() -> void:
 	_close_all_panels()
 	_update_missions_panel()
+	_update_inspections_section()
 	_missions_panel.visible = true
 
 func _on_menu_blueprints() -> void:
 	_close_all_panels()
 	_update_blueprints_panel()
 	_blueprints_panel.visible = true
+
+# ══════════════════════════════════════════════════════════════════════════
+# Trade Show panel
+# ══════════════════════════════════════════════════════════════════════════
+
+func _build_tradeshow_panel() -> void:
+	_tradeshow_panel         = CanvasLayer.new()
+	_tradeshow_panel.name    = "TradeShowPanel"
+	_tradeshow_panel.layer   = 22
+	_tradeshow_panel.visible = false
+	add_child(_tradeshow_panel)
+
+	var bg     := ColorRect.new()
+	bg.color    = C_PANEL
+	bg.position = Vector2.ZERO
+	bg.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H)
+	_tradeshow_panel.add_child(bg)
+
+	var close_btn := _build_panel_header(_tradeshow_panel, "TRADE SHOW", Color(1.0, 0.85, 0.2))
+	close_btn.pressed.connect(func() -> void: _tradeshow_panel.visible = false)
+
+	# Scrollable content
+	var scroll     := ScrollContainer.new()
+	scroll.position = Vector2(0, 82)
+	scroll.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 82)
+	_tradeshow_panel.add_child(scroll)
+
+	var vbox     := VBoxContainer.new()
+	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
+	vbox.add_theme_constant_override("separation", 0)
+	scroll.add_child(vbox)
+
+	# ── Event header block ──────────────────────────────────────────────────
+	var hdr_bg     := ColorRect.new()
+	hdr_bg.color    = Color(0.10, 0.10, 0.16)
+	hdr_bg.custom_minimum_size = Vector2(SCREEN_W, 96)
+	vbox.add_child(hdr_bg)
+
+	var accent_strip     := ColorRect.new()
+	accent_strip.color    = Color(1.0, 0.85, 0.2)
+	accent_strip.position = Vector2.ZERO
+	accent_strip.size     = Vector2(SCREEN_W, 4)
+	hdr_bg.add_child(accent_strip)
+
+	_lbl_ts_event_name = Label.new()
+	_lbl_ts_event_name.position = Vector2(16, 10)
+	_lbl_ts_event_name.size     = Vector2(SCREEN_W - 32, 32)
+	_lbl_ts_event_name.add_theme_font_size_override("font_size", 20)
+	_lbl_ts_event_name.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	hdr_bg.add_child(_lbl_ts_event_name)
+
+	_lbl_ts_desc = Label.new()
+	_lbl_ts_desc.position      = Vector2(16, 44)
+	_lbl_ts_desc.size          = Vector2(SCREEN_W - 32, 28)
+	_lbl_ts_desc.add_theme_font_size_override("font_size", 13)
+	_lbl_ts_desc.add_theme_color_override("font_color", C_DIM)
+	hdr_bg.add_child(_lbl_ts_desc)
+
+	_lbl_ts_timer = Label.new()
+	_lbl_ts_timer.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_lbl_ts_timer.position             = Vector2(0, 68)
+	_lbl_ts_timer.size                 = Vector2(SCREEN_W - 16, 22)
+	_lbl_ts_timer.add_theme_font_size_override("font_size", 12)
+	_lbl_ts_timer.add_theme_color_override("font_color", C_DIM)
+	hdr_bg.add_child(_lbl_ts_timer)
+
+	# ── Tasks section ───────────────────────────────────────────────────────
+	var tasks_hdr := _ts_section_header(vbox, "CHALLENGES")
+	tasks_hdr.add_theme_color_override("font_color", C_TEXT)
+
+	# Placeholder task cards — filled in by _update_tradeshow_panel()
+	for i in 3:
+		_ts_task_cards.append(_build_ts_task_card(vbox))
+
+	# ── Rewards section ─────────────────────────────────────────────────────
+	_ts_section_header(vbox, "REWARD TRACK")
+
+	for i in 3:
+		_ts_reward_cards.append(_build_ts_reward_card(vbox, i))
+
+	# Bottom pad
+	var pad     := Control.new()
+	pad.custom_minimum_size = Vector2(SCREEN_W, 24)
+	vbox.add_child(pad)
+
+func _ts_section_header(parent: VBoxContainer, title: String) -> Label:
+	var hdr     := ColorRect.new()
+	hdr.color    = Color(0.08, 0.09, 0.14)
+	hdr.custom_minimum_size = Vector2(SCREEN_W, 40)
+	parent.add_child(hdr)
+	var lbl     := Label.new()
+	lbl.text     = title
+	lbl.position = Vector2(16, 8)
+	lbl.size     = Vector2(SCREEN_W - 32, 26)
+	lbl.add_theme_font_size_override("font_size", 14)
+	lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	hdr.add_child(lbl)
+	return lbl
+
+func _build_ts_task_card(parent: VBoxContainer) -> Dictionary:
+	var card     := ColorRect.new()
+	card.color    = C_CARD
+	card.custom_minimum_size = Vector2(SCREEN_W, 94)
+	parent.add_child(card)
+
+	var strip     := ColorRect.new()
+	strip.color    = C_BORDER
+	strip.position = Vector2.ZERO
+	strip.size     = Vector2(5, 94)
+	card.add_child(strip)
+
+	var sep     := ColorRect.new()
+	sep.color    = C_BORDER
+	sep.position = Vector2(5, 92)
+	sep.size     = Vector2(SCREEN_W - 5, 2)
+	card.add_child(sep)
+
+	var desc_lbl     := Label.new()
+	desc_lbl.position = Vector2(18, 8)
+	desc_lbl.size     = Vector2(SCREEN_W - 36, 30)
+	desc_lbl.add_theme_font_size_override("font_size", 14)
+	desc_lbl.add_theme_color_override("font_color", C_TEXT)
+	card.add_child(desc_lbl)
+
+	var bar_bg     := ColorRect.new()
+	bar_bg.color    = C_BORDER
+	bar_bg.position = Vector2(18, 44)
+	bar_bg.size     = Vector2(SCREEN_W - 200, 14)
+	card.add_child(bar_bg)
+
+	var bar_fill     := ColorRect.new()
+	bar_fill.color    = Color(1.0, 0.85, 0.2)
+	bar_fill.position = Vector2(18, 44)
+	bar_fill.size     = Vector2(0, 14)
+	card.add_child(bar_fill)
+
+	var prog_lbl     := Label.new()
+	prog_lbl.position = Vector2(18, 60)
+	prog_lbl.size     = Vector2(SCREEN_W - 200, 22)
+	prog_lbl.add_theme_font_size_override("font_size", 12)
+	prog_lbl.add_theme_color_override("font_color", C_DIM)
+	card.add_child(prog_lbl)
+
+	var done_lbl     := Label.new()
+	done_lbl.text     = ""
+	done_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	done_lbl.position = Vector2(SCREEN_W - 178, 30)
+	done_lbl.size     = Vector2(162, 36)
+	done_lbl.add_theme_font_size_override("font_size", 14)
+	done_lbl.add_theme_color_override("font_color", C_GREEN)
+	card.add_child(done_lbl)
+
+	return {"card": card, "strip": strip, "desc_lbl": desc_lbl,
+			"bar_bg": bar_bg, "bar_fill": bar_fill,
+			"prog_lbl": prog_lbl, "done_lbl": done_lbl}
+
+func _build_ts_reward_card(parent: VBoxContainer, tier_idx: int) -> Dictionary:
+	var card     := ColorRect.new()
+	card.color    = C_CARD
+	card.custom_minimum_size = Vector2(SCREEN_W, 80)
+	parent.add_child(card)
+
+	var sep     := ColorRect.new()
+	sep.color    = C_BORDER
+	sep.position = Vector2(0, 78)
+	sep.size     = Vector2(SCREEN_W, 2)
+	card.add_child(sep)
+
+	# Tier badge (T1 / T2 / T3)
+	var tier_lbl     := Label.new()
+	tier_lbl.text     = "T%d" % (tier_idx + 1)
+	tier_lbl.position = Vector2(16, 22)
+	tier_lbl.size     = Vector2(40, 36)
+	tier_lbl.add_theme_font_size_override("font_size", 18)
+	tier_lbl.add_theme_color_override("font_color", Color(1.0, 0.85, 0.2))
+	card.add_child(tier_lbl)
+
+	var label_lbl     := Label.new()
+	label_lbl.position = Vector2(62, 8)
+	label_lbl.size     = Vector2(360, 24)
+	label_lbl.add_theme_font_size_override("font_size", 13)
+	label_lbl.add_theme_color_override("font_color", C_DIM)
+	card.add_child(label_lbl)
+
+	var reward_lbl     := Label.new()
+	reward_lbl.position = Vector2(62, 32)
+	reward_lbl.size     = Vector2(360, 28)
+	reward_lbl.add_theme_font_size_override("font_size", 16)
+	reward_lbl.add_theme_color_override("font_color", C_GEM)
+	card.add_child(reward_lbl)
+
+	var claim_btn     := Button.new()
+	claim_btn.text     = "CLAIM"
+	claim_btn.position = Vector2(SCREEN_W - 170, 16)
+	claim_btn.size     = Vector2(154, 48)
+	claim_btn.disabled = true
+	claim_btn.pressed.connect(_on_ts_claim.bind(tier_idx))
+	_apply_btn_style(claim_btn, Color(1.0, 0.85, 0.2).darkened(0.50))
+	card.add_child(claim_btn)
+
+	var status_lbl     := Label.new()
+	status_lbl.text     = ""
+	status_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	status_lbl.position = Vector2(SCREEN_W - 170, 16)
+	status_lbl.size     = Vector2(154, 48)
+	status_lbl.add_theme_font_size_override("font_size", 14)
+	status_lbl.add_theme_color_override("font_color", C_GREEN)
+	card.add_child(status_lbl)
+
+	return {"card": card, "label_lbl": label_lbl, "reward_lbl": reward_lbl,
+			"claim_btn": claim_btn, "status_lbl": status_lbl}
+
+## Initialise a new event: advance index, reset progress, set expiry.
+func _ts_start_new_event() -> void:
+	var ts: Dictionary = GameState.trade_show_state
+	# Advance to next event (wraps around)
+	if float(ts.get("expires_at", 0.0)) > 0.0:
+		ts["event_index"] = (int(ts.get("event_index", 0)) + 1) % TradeShowDatabase.event_count()
+	ts["expires_at"]      = Time.get_unix_time_from_system() \
+		+ TradeShowDatabase.EVENT_DURATION_DAYS * 86400.0
+	ts["task_progress"]   = {}
+	ts["claimed_rewards"] = [0, 0, 0]
+	GameState.trade_show_state = ts
+
+## Returns true if the current event is active (not yet expired).
+func _ts_is_active() -> bool:
+	var expires := float(GameState.trade_show_state.get("expires_at", 0.0))
+	return expires > Time.get_unix_time_from_system()
+
+## Ensures a valid event is running; starts one if needed.
+func _ts_ensure_active() -> void:
+	if not _ts_is_active():
+		_ts_start_new_event()
+
+## Advances progress for tasks matching `type`. `value` = amount, `tier_id` = for tier comparisons.
+## Called from _complete_building, _break_node, _complete_stage.
+func _ts_progress(type: String, value: int, tier_id: String) -> void:
+	_ts_ensure_active()
+	var ts: Dictionary  = GameState.trade_show_state
+	var ev: Dictionary  = TradeShowDatabase.get_event(int(ts.get("event_index", 0)))
+	var tasks: Array    = ev.get("tasks", [])
+	var prog: Dictionary = ts.get("task_progress", {})
+	var changed := false
+
+	for task: Dictionary in tasks:
+		var task_type: String = task.get("type", "")
+		if task_type != type:
+			continue
+		var tid: String = task.get("id", "")
+		var target: int = int(task.get("target", 1))
+		var current: int = int(prog.get(tid, 0))
+		if current >= target:
+			continue   # already complete
+
+		var add := 0
+		match type:
+			"complete_builds_any":
+				add = value
+			"break_nodes":
+				add = value
+			"earn_stage_cash":
+				add = value
+			"complete_tier_min":
+				# Only count if completed tier is >= required tier
+				var req_tier: String = task.get("tier", "shed")
+				var req_idx  := TradeShowDatabase.tier_index(req_tier)
+				var done_idx := TradeShowDatabase.tier_index(tier_id)
+				if done_idx >= req_idx:
+					add = value
+
+		if add > 0:
+			prog[tid] = mini(current + add, target)
+			changed = true
+
+	if changed:
+		ts["task_progress"] = prog
+		GameState.trade_show_state = ts
+		if _tradeshow_panel and _tradeshow_panel.visible:
+			_update_tradeshow_panel()
+
+## Returns how many tasks in the current event are fully completed.
+func _ts_completed_task_count() -> int:
+	var ts: Dictionary  = GameState.trade_show_state
+	var ev: Dictionary  = TradeShowDatabase.get_event(int(ts.get("event_index", 0)))
+	var tasks: Array    = ev.get("tasks", [])
+	var prog: Dictionary = ts.get("task_progress", {})
+	var count := 0
+	for task: Dictionary in tasks:
+		var tid: String = task.get("id", "")
+		var target: int = int(task.get("target", 1))
+		if int(prog.get(tid, 0)) >= target:
+			count += 1
+	return count
+
+func _update_tradeshow_panel() -> void:
+	_ts_ensure_active()
+	var ts: Dictionary   = GameState.trade_show_state
+	var ev: Dictionary   = TradeShowDatabase.get_event(int(ts.get("event_index", 0)))
+	var tasks: Array     = ev.get("tasks", [])
+	var rewards: Array   = ev.get("rewards", [])
+	var prog: Dictionary = ts.get("task_progress", {})
+	var claimed: Array   = ts.get("claimed_rewards", [0, 0, 0])
+	var ev_color: Color  = ev.get("color", Color(1.0, 0.85, 0.2))
+
+	# Header
+	if _lbl_ts_event_name:
+		_lbl_ts_event_name.text = ev.get("name", "")
+		_lbl_ts_event_name.add_theme_color_override("font_color", ev_color)
+	if _lbl_ts_desc:
+		_lbl_ts_desc.text = ev.get("desc", "")
+	_refresh_ts_timer_label()
+
+	# Task cards
+	var completed_count := 0
+	for i in _ts_task_cards.size():
+		var refs: Dictionary = _ts_task_cards[i]
+		if i >= tasks.size():
+			(refs["card"] as ColorRect).visible = false
+			continue
+		var task: Dictionary = tasks[i]
+		var tid: String      = task.get("id", "")
+		var target: int      = int(task.get("target", 1))
+		var current: int     = int(prog.get(tid, 0))
+		var done: bool       = current >= target
+
+		if done:
+			completed_count += 1
+
+		(refs["strip"]    as ColorRect).color = C_GREEN if done else ev_color.darkened(0.30)
+		(refs["desc_lbl"] as Label).text      = task.get("desc", "")
+		(refs["desc_lbl"] as Label).add_theme_color_override(
+			"font_color", C_GREEN if done else C_TEXT)
+
+		var bar_w: float = (refs["bar_bg"] as ColorRect).size.x \
+			* clampf(float(current) / float(maxi(target, 1)), 0.0, 1.0)
+		(refs["bar_fill"] as ColorRect).size  = Vector2(bar_w, 14)
+		(refs["bar_fill"] as ColorRect).color = C_GREEN if done else ev_color
+		(refs["prog_lbl"] as Label).text      = "%s / %s" % [_fmt(current), _fmt(target)]
+		(refs["done_lbl"] as Label).text      = "✓ Done" if done else ""
+
+	# Reward cards (T1 requires 1 task done, T2 needs 2, T3 needs all 3)
+	for i in _ts_reward_cards.size():
+		var refs: Dictionary    = _ts_reward_cards[i]
+		if i >= rewards.size():
+			(refs["card"] as ColorRect).visible = false
+			continue
+		var rw: Dictionary  = rewards[i]
+		var unlocked: bool  = completed_count >= (i + 1)
+		var already: bool   = (claimed is Array and i < claimed.size() and int(claimed[i]) == 1)
+
+		(refs["label_lbl"]  as Label).text = rw.get("label", "")
+		(refs["reward_lbl"] as Label).text = "+%d 💎" % int(rw.get("gems", 0))
+
+		if already:
+			(refs["claim_btn"]  as Button).visible    = false
+			(refs["status_lbl"] as Label).text        = "✓ Claimed"
+		elif unlocked:
+			(refs["claim_btn"]  as Button).visible    = true
+			(refs["claim_btn"]  as Button).disabled   = false
+			(refs["status_lbl"] as Label).text        = ""
+		else:
+			(refs["claim_btn"]  as Button).visible    = true
+			(refs["claim_btn"]  as Button).disabled   = true
+			(refs["status_lbl"] as Label).text        = ""
+
+func _refresh_ts_timer_label() -> void:
+	if not _lbl_ts_timer:
+		return
+	var expires := float(GameState.trade_show_state.get("expires_at", 0.0))
+	var secs    := expires - Time.get_unix_time_from_system()
+	if secs <= 0.0:
+		_lbl_ts_timer.text = "Event ended — new event starting soon"
+	else:
+		var d := int(secs) / 86400
+		var h := (int(secs) % 86400) / 3600
+		var m := (int(secs) % 3600) / 60
+		_lbl_ts_timer.text = "Ends in  %dd %dh %dm" % [d, h, m]
+
+func _on_ts_claim(tier_idx: int) -> void:
+	_ts_ensure_active()
+	var ts: Dictionary = GameState.trade_show_state
+	var ev: Dictionary = TradeShowDatabase.get_event(int(ts.get("event_index", 0)))
+	var rewards: Array = ev.get("rewards", [])
+	var claimed: Array = ts.get("claimed_rewards", [0, 0, 0])
+
+	if tier_idx >= rewards.size():
+		return
+	if tier_idx >= claimed.size() or int(claimed[tier_idx]) == 1:
+		return
+	if _ts_completed_task_count() < tier_idx + 1:
+		return
+
+	var rw: Dictionary = rewards[tier_idx]
+	GameState.gems   += int(rw.get("gems", 0))
+	claimed[tier_idx] = 1
+	ts["claimed_rewards"] = claimed
+	GameState.trade_show_state = ts
+	_update_hud()
+	_flash_feedback("🏆 Trade Show reward!  +%d 💎" % int(rw.get("gems", 0)))
+	_update_tradeshow_panel()
+
+func _on_menu_tradeshow() -> void:
+	_close_all_panels()
+	_ts_ensure_active()
+	_update_tradeshow_panel()
+	_tradeshow_panel.visible = true
 
 # ══════════════════════════════════════════════════════════════════════════
 # Toolbox Panel
@@ -5208,6 +6098,62 @@ func _award_blueprint_fragment(bp_id: String) -> void:
 		_show_fragment_popup(short_name, bp.get("color", Color.WHITE),
 			"Fragment found",
 			"%d / %d toward Lv %d" % [entry["fragments"], threshold, lvl + 1])
+
+## Silently awards `count` blueprint fragments without showing a fragment popup.
+## Handles level-ups automatically. Used by inspection reward logic.
+func _grant_blueprint_fragments(bp_id: String, count: int) -> void:
+	var bp := BlueprintDatabase.get_blueprint(bp_id)
+	if bp.is_empty():
+		return
+	if not GameState.blueprints.has(bp_id):
+		GameState.blueprints[bp_id] = {"level": 0, "fragments": 0}
+	var entry: Dictionary = GameState.blueprints[bp_id]
+	entry["fragments"] = int(entry.get("fragments", 0)) + count
+	# Level up as many times as the fragment total allows
+	while true:
+		var lvl: int = int(entry.get("level", 0))
+		if lvl >= BlueprintDatabase.MAX_LEVEL:
+			entry["fragments"] = 0
+			break
+		var threshold: int = BlueprintDatabase.fragments_for_next_level(lvl)
+		if int(entry["fragments"]) < threshold:
+			break
+		entry["fragments"] -= threshold
+		entry["level"] = lvl + 1
+	GameState.blueprints[bp_id] = entry
+
+## Checks all inspections for `tier_id` and awards rewards for any newly passed ones.
+## Called at the end of _complete_building(), before current_building is reset.
+func _check_inspections(tier_id: String) -> void:
+	var now     := Time.get_unix_time_from_system()
+	var started := float(GameState.current_building.get("build_started_at", now))
+	var elapsed_min := (now - started) / 60.0
+	var gem_skips   := int(GameState.current_building.get("gem_skips_used", 0))
+
+	var passed_any := false
+	for insp: Dictionary in InspectionDatabase.get_for_tier(tier_id):
+		var iid: String = insp["id"]
+		if GameState.completed_inspections.has(iid):
+			continue   # already earned — permanent
+		var passed := false
+		match insp.get("condition_type", ""):
+			"no_skip": passed = gem_skips == 0
+			"speed":   passed = elapsed_min <= float(insp.get("condition_value", 9999))
+		if not passed:
+			continue
+		GameState.completed_inspections.append(iid)
+		var frags: int = int(insp.get("reward_fragments", 0))
+		var gems: int  = int(insp.get("reward_gems", 0))
+		var bp_id := BlueprintDatabase.building_drop_id(tier_id)
+		_grant_blueprint_fragments(bp_id, frags)
+		GameState.gems += gems
+		_flash_feedback("✅ Inspection Passed: %s\n+%d fragments  +%d 💎" \
+			% [insp.get("name", ""), frags, gems])
+		passed_any = true
+	if passed_any:
+		_update_hud()
+		if _missions_panel and _missions_panel.visible:
+			_update_inspections_section()
 
 ## Shows a small toast-style popup near the top of the mine area.
 ## Auto-dismisses after ~2.5 s.

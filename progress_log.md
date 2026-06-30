@@ -622,3 +622,192 @@ Nothing — all 4 features implemented.
 5. Build a second shed — confirm no first bonus the second time
 6. Check BUILD panel footer shows "🏘 Build your skyline..." or income rate once shed in skyline
 7. Commit once all checks pass
+
+---
+
+## 2026-06-30 — Skyline panel rebuild + backdrop spawn fixes
+
+### Completed this session
+
+**Skyline panel overhaul (Main.gd)**
+- Added `_lbl_skyline_stats: Label` member var
+- `_build_skyline_panel()`: stats label stored (replaces anonymous `sub` label); scroll starts at y=134
+- `_update_skyline_panel()` fully rewritten:
+  - Summary stats row: "X buildings • +X/min income" + all-time portfolio line
+  - Buildings grouped by tier (first-seen order) with ×count badge
+  - Each card: tier-colour accent bar, building name, count badge (amber), tier/income sub-line, ⭐ First build badge (gold), 🔨 Building now… indicator for active tier
+  - Portfolio footer section if prior-contract buildings exist
+- `_complete_building()`: calls `_update_skyline_panel()` immediately if panel is open
+
+**Tree spawn area (Main.gd)**
+- Added `LOCATION_SPAWN_BOUNDS` const dict; `_random_mine_pos()` uses location-specific Rect2 bounds
+- Lumber Yard bounds: `Rect2(140, 360, 400, 310)` — inner rectangle of soil diamond, keeps trees off surrounding grass
+- Tree sprite scale reduced to `randf_range(0.40, 0.60)` to match backdrop tree size
+
+### Currently in progress / left mid-task
+Nothing.
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Open SKYLINE panel — check stats summary, cards show tier/income/count/first-build badge correctly
+3. Complete another building while Skyline is open — confirm it updates live
+4. Start new contract (prestige) — confirm "All-time portfolio" footer appears on next run
+5. Commit once verified
+
+---
+
+## 2026-06-30 — Branching skill tree
+
+### Completed this session
+
+**SkillDatabase.gd** (new autoload, registered in project.godot)
+- 15 skill nodes across 3 branches (Carpentry / Masonry / M&E), 5 nodes each
+- Linear prerequisites (node N requires node N-1)
+- 1 SP per skill, 1 SP awarded per player level-up
+- Effects: mine_power_pct, worker_rate_pct, build_progress_pct, stage_cash_pct, double_craft_chance, drop_bonus, build_power_pct, xp_pct
+- Public API: get_branch(), get_skill(), get_all(), can_purchase(), get_total_effect_bonus()
+
+**GameState.gd**
+- Added `skill_points: int` and `skill_tree: Dictionary`
+- Added `get_skill_bonus(effect) -> float` (delegates to SkillDatabase)
+- Wired skill bonuses into ALL 7 multiplier functions:
+  - get_mine_power() — mine_power_pct
+  - get_worker_rate_mult() — worker_rate_pct
+  - get_drop_bonus() — drop_bonus
+  - get_xp_mult() — xp_pct
+  - get_stage_cash_mult() — stage_cash_pct
+  - get_build_power() — build_power_pct
+  - get_double_craft_chance() — double_craft_chance
+  - get_build_progress_mult() — build_progress_pct
+
+**SaveManager.gd**
+- Saves/loads skill_points + skill_tree
+- Both zeroed in _init_fresh_state() and prestige_reset()
+- skill_tree resets on prestige (skills are per-contract, SP resets too)
+
+**Main.gd — UPGRADES panel overhaul**
+- Added GENERAL / SKILLS tab buttons below panel header (y=82)
+- GENERAL tab: existing upgrade cards (unchanged)
+- SKILLS tab: 3-column layout (one column per branch)
+  - SP counter row at top: "Skill Points available: N"
+  - Per branch: coloured header (name + subtitle) + 5 stacked skill cards + ▼ arrows
+  - Skill cards: name, desc, state bar, 1 SP cost, BUY button
+  - Purchased: green state bar, "✓ Learned", button disabled
+  - Unlockable: accent bar, "1 SP" in gold, BUY enabled
+  - Locked: grey bar, "Locked"/"Need SP", disabled
+- `_on_skill_buy(skill_id)`: deducts SP, marks tree, refreshes tab, flashes skill name
+- `_on_level_up()`: awards +1 SP, flash message updated to include "(+1 SP)"
+- `_update_skills_tab()` called when opening upgrades, switching to SKILLS tab, after buy, after level-up
+
+### Currently in progress / left mid-task
+All changes implemented. Needs Godot reload + test.
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Level up a few times — check SP counter increases in UPGRADES > SKILLS
+3. Buy first node in each branch — verify unlocked states cascade correctly
+4. Confirm bought skills actually affect gameplay (mine hits harder, worker rate increases, etc.)
+5. Prestige → confirm skill_tree and skill_points both reset to 0
+6. Commit once verified
+
+---
+
+## 2026-06-30 — Trade Shows
+
+### Completed this session
+
+**TradeShowDatabase.gd** (new autoload, registered in project.godot)
+- 4 rotating events: Foundation Fair, High Rise Showcase, Materials Expo, Blueprint Awards
+- 7-day duration each (28-day full cycle, back-to-back)
+- 3 tasks per event; task types: complete_builds_any, break_nodes, earn_stage_cash, complete_tier_min
+- 3 reward tiers per event (gems only): T1=20-30, T2=45-65, T3=80-120 gems scaling by event difficulty
+- `tier_index()` helper uses BuildDatabase.TIER_ORDER for complete_tier_min comparisons
+
+**GameState.gd**
+- Added `trade_show_state: Dictionary` (event_index, expires_at, task_progress, claimed_rewards)
+
+**SaveManager.gd**
+- Saves/loads trade_show_state; resets in _init_fresh_state() and prestige_reset()
+
+**project.godot**
+- Registered TradeShowDatabase after InspectionDatabase
+
+**Main.gd**
+- SHORTCUT_DEFS: added "tradeshow" (★ symbol, gold color)
+- Menu overlay: added "TRADE SHOW" entry
+- _shortcut_color() / _on_shortcut_pressed(): wired
+- _close_all_panels(): hides _tradeshow_panel
+- Member vars: _tradeshow_panel, _lbl_ts_event_name, _lbl_ts_desc, _lbl_ts_timer, _ts_task_cards, _ts_reward_cards, _ts_panel_timer
+- _process(): refreshes trade show timer label every second while panel is open
+- Progress hooks:
+  - _complete_building() → _ts_progress("complete_builds_any") + _ts_progress("complete_tier_min")
+  - _break_node() → _ts_progress("break_nodes")
+  - _complete_stage() → _ts_progress("earn_stage_cash")
+- _build_tradeshow_panel(): full-screen panel with event header, 3 task cards, 3 reward tier cards
+- _ts_start_new_event(): advances event_index, resets progress + claimed_rewards, sets expires_at
+- _ts_is_active() / _ts_ensure_active(): guard called before any panel update or progress write
+- _ts_progress(type, value, tier_id): increments matching task progress, refreshes panel if open
+- _ts_completed_task_count(): counts fully completed tasks for reward unlock gating
+- _update_tradeshow_panel(): fills event name/desc/timer, task progress bars + done badges, reward claim buttons
+- _refresh_ts_timer_label(): Xd Xh Xm countdown format
+- _on_ts_claim(tier_idx): awards gems, marks reward as claimed, flashes feedback
+- _on_menu_tradeshow(): close all panels → ensure active → update → show
+
+### Currently in progress / left mid-task
+All changes implemented. Needs Godot reload + test.
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Open TRADE SHOW from menu or ★ shortcut — see current event name, 7-day countdown, 3 tasks
+3. Complete a building → task "Complete X buildings" increments
+4. Break nodes → task "Break X nodes" increments
+5. Complete a Two-Storey House → "complete_tier_min" task increments if event has one
+6. Claim T1 reward (1 task done) → gems added, button changes to ✓ Claimed
+7. Wait for event expiry (or temporarily shorten EVENT_DURATION_DAYS to 0.001 for testing) → new event starts
+8. Prestige → trade_show_state resets
+9. Commit once verified
+
+---
+
+## 2026-06-30 — Site Inspections
+
+### Completed this session
+
+**InspectionDatabase.gd** (new autoload, registered in project.godot)
+- 16 inspections: 2 per tier × 8 tiers
+- Condition types: "no_skip" (Clean Build — no gem stage-skip) and "speed" (Fast Track — under time limit)
+- Speed limits: 2× minimum cooldown time per tier (e.g. Shed 60 min, Skyscraper 180 min)
+- Rewards: blueprint fragments (for that tier's building blueprint) + gems — scale with tier difficulty
+
+**GameState.gd**
+- Added `completed_inspections: Array` (permanent, survives prestige like first_completions)
+
+**SaveManager.gd**
+- Saves/loads `completed_inspections` in save_game + load_game + _init_fresh_state
+- NOT reset in prestige_reset() (permanent across all contracts)
+
+**project.godot**
+- Registered `InspectionDatabase` after SkillDatabase
+
+**Main.gd**
+- `_on_start_stage_pressed()`: records `build_started_at` timestamp and initialises `gem_skips_used = 0` in `current_building` when first stage (index 0) starts — only once per build
+- `_on_stage_skip_pressed()`: increments `current_building["gem_skips_used"]` on every gem skip
+- `_complete_building()`: calls `_check_inspections(tier_id)` before resetting current_building
+- `_check_inspections(tier_id)`: evaluates all uncompleted inspections for the tier, marks them done, calls `_grant_blueprint_fragments()`, awards gems, shows flash feedback
+- `_grant_blueprint_fragments(bp_id, count)`: silent multi-fragment award with correct level-up loop
+- MISSIONS panel: added "SITE INSPECTIONS" section below Weekly Missions with a subtitle explaining permanence; 16 inspection cards; green accent strip + "✓ PASSED" badge on completion
+- `_make_inspection_card()`: builds one card (tier label, name, desc, reward, done badge)
+- `_update_inspections_section()`: refreshes all card colours and done badges
+- `_on_menu_missions()`: calls `_update_inspections_section()` when panel opens
+
+### Currently in progress / left mid-task
+All changes implemented. Needs Godot reload + test.
+
+### Next step (superseded — see Trade Shows below)
+1. Open Godot — confirm 0 parser errors
+2. Open MISSIONS panel — scroll to bottom to see SITE INSPECTIONS section with 16 cards
+3. Start a Shed build WITHOUT using gem skip → complete it → "Inspection Passed: Clean Build" flash; open MISSIONS → Shed Clean Build shows ✓ PASSED
+4. Start another Shed build, use gem skip → complete → confirm Clean Build is not re-awarded (already passed) and Speed build doesn't trigger (no timestamp set trick)
+5. Check blueprint fragments were actually awarded (BLUEPRINTS panel → Shed Blueprint level/fragments increased)
+6. Confirm completed_inspections survives prestige
+7. Commit once verified
