@@ -48,17 +48,26 @@
 - `_on_menu_skill_tree()`: opens UPGRADES panel on SKILLS tab
 
 ### Currently in progress / left mid-task
-All changes implemented. Needs Godot reload + test.
+Utilities panel UI redesigned (2026-07-01 continuation). Needs Godot reload + test.
+
+### Utilities panel redesign (2026-07-01 continuation)
+- **UTILS float button** moved left: now sits at X=580, Y=1020 — side-by-side with TOOLS (X=650, Y=1020), no longer overlapping
+- **Utilities panel** slimmed to 160px height (was 480px), no scrim, no dark overlay — mine screen fully visible underneath
+- **Icon-only row** (top 72px): 56px icon buttons in a horizontal row; currently Blasting Cap (💥); designed to accept more icons
+- **Info bar** (bottom 84px): shows name + description + status when an icon is tapped; FIRE button appears only when an item is selected
+- Added member vars: `_util_selected: String`, `_util_info_name: Label`, `_util_info_desc: Label`
+- `_update_utilities_panel()` now checks `_util_selected` — shows blast cap info when tapped, "Tap a utility" prompt when nothing selected
+- `_on_menu_utilities()` resets `_util_selected = ""` on open
 
 ### Next step
 1. Open Godot — confirm 0 parser errors
-2. Mine screen: tap-hold a node — damage should tick continuously at tool speed rate
-3. Blasting Cap button (bottom-right of mine area): fire it — all nodes take 1× mine power damage, 30s cooldown shows countdown
-4. Complete 30 wave clears at Lumber Yard — Stone Quarry should unlock
-5. Open menu — MINE / TOOLBOX / TRADE SHOW / SHOP should be gone; SKILL TREE visible (locked if < 4 buildings); MISSIONS / BLUEPRINTS show lock text until threshold met
-6. Receive a delivery pallet or vintage chest — chest button appears centred on mine screen; open it to see popup
-7. Vintage chest: verify permanent stat modifier added to `chest_modifiers` and affects gameplay stat
-8. Tutorial strip: complete all 18 tasks, confirm congrats screen appears and auto-hides after 4s
+2. On mine screen: tap ⚡ UTILS button (left of TOOLS, same row) — slim 160px tray should appear above bottom bar with mine screen visible behind it
+3. Tap 💥 icon — info bar should populate with "Blasting Cap", description, ready/cooldown status, and FIRE button
+4. Fire blast cap — info bar should flip to countdown; re-check after 30s shows READY again
+5. Mine screen: tap-hold a node — damage ticks continuously at tool speed rate
+6. Complete 30 wave clears at Lumber Yard — Stone Quarry unlocks
+7. Open menu — confirm MINE / TOOLBOX / TRADE SHOW / SHOP gone; SKILL TREE, MISSIONS, BLUEPRINTS, DELIVERY PALLETS, VINTAGE CHEST present
+8. Receive a chest — flash notification appears; open from menu panels
 9. Commit once verified
 
 ---
