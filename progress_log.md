@@ -2,6 +2,176 @@
 
 ---
 
+## 2026-07-02 (session 4) — Accumulator popups, skyline level cap, file reconstruction
+
+### Completed this session
+
+**Main.gd — material popup → accumulator pattern**
+- Replaced per-hit `_spawn_mat_popup` (individual fly-up labels) with `_add_mat_popup(mat, amount)` accumulator
+- Count stacks for 5 seconds of idle: each new gain on the same material resets the 5s tween and updates the label text (`+N Material`)
+- On idle expiry: label fades out over 0.5s then `queue_free`s and cleans up all three dicts (`_mat_accum`, `_mat_popup_labels`, `_mat_popup_tweens`)
+- Labels positioned at left edge (x=12), stacked upward by slot index (32px gap), `MOUSE_FILTER_IGNORE`
+
+**Main.gd — skyline level 10 gate**
+- `_update_skyline_panel()`: `CONTRACT_MIN_LEVEL = 10`; `_btn_new_contract.visible` / `_lbl_new_contract_locked.visible` toggled based on `GameState.player_level >= 10`
+- `_on_new_contract_pressed()`: early return guard if `GameState.player_level < 10`
+- Prevents signing a new contract below level 10 regardless of UI state
+
+**File reconstruction (Major)**
+- Edit tool caused catastrophic truncation (8066→4872 lines) — entire middle section lost
+- Rebuilt via Python: spliced HEAD git content (7800 lines) with all session changes
+- Session-only functions reconstructed: `_add_mat_popup`, accumulator vars, `_update_skyline_panel` with level gate, `_on_new_contract_pressed` guard, `_build_utilities_panel`, `_update_utilities_panel`, `_on_menu_utilities`, `_update_vintage_chest_panel`, `_on_menu_vintage_chest`
+- Duplicate `const UTIL_ACCENT` removed (HEAD already contained it)
+
+**Parser fix — missing `for` loop header (line 4841)**
+- After reconstruction, `_update_skyline_panel` was missing `for child in _skyline_list_box.get_children():` before `child.queue_free()`
+- Caused: "Expected statement, found 'Indent'" at 4841, "Unexpected 'if' in class body" at 4846–4847
+- Fixed via Edit tool; tail truncation restored via Python anchor script after each Edit call
+- File confirmed at 8067 lines with correct `_on_menu_vintage_chest` tail
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Mine nodes at active location — green "+X Material" popup should appear at left edge; rapid clicking stacks the count; 5s idle → fades
+3. Open SKYLINE panel below level 10 — New Contract button hidden, locked label visible
+4. Reach level 10 — New Contract button appears
+5. Git commit
+
+---
+
+## 2026-07-02 (session 3) — Material gather popups, utilities overhaul, UTILS/TOOLS panel toggle
+
+### Completed this session
+
+**Main.gd — material gather side popups**
+- Added `var _mat_popup_count: int = 0` instance var (stacking offset counter)
+- Added `_spawn_mat_popup(mat, amount)`: spawns a small green Label at the left edge (x=12), stacked upward per active popup (28px gap), slides up 40px over 1.2s (QUAD OUT), fades out from 0.6s, `queue_free` + counter decrement at 1.5s
+- Called in `_break_node()` alongside `_flash_feedback` when `loc_id == active_location_id`
+- Truncation fix applied again after Python write (anchor: `_on_menu_vintage_chest() -> void:`)
+
+**Main.gd — utilities panel + charge system (session 2 carry-over)**
+- `ALL_UTIL_DEFS` array: 6 utilities — Blasting Cap (200 charges), Det Chord (x3 chain), Yield Charge (2x drop), Apprentice Notice (2x XP), Demolition Order (10x power), Supply Run (+2 all)
+- Charge-based recharge: `utility_counts` dict, `utility_recharge_at` dict — ticks every 1s in `_process`
+- Utilities panel: same tray design as toolbox, UTILS float hides TOOLS float when open, UTILS button shifts to TOOLS position (CanvasLayer.offset = Vector2(70,0)) while panel is open
+- Effect functions: `_effect_blast_cap/det_chord/yield_charge/apprentice_notice/demo_order/supply_run`
+- `_break_node`: consumes yield_charge_stacks (2x drop) and apprentice_notice_stacks (2x XP)
+- `_close_all_panels` restores both float buttons and resets UTILS offset
+
+**GameState.gd + SaveManager.gd — unified utility system**
+- `utility_counts`, `utility_recharge_at`, `yield_charge_stacks`, `apprentice_notice_stacks` vars
+- Save/load with migration from old `blast_cap_count` / `blasting_cap_cooldown_until` fields
+- Fresh init sets blast_cap=200, all others to their defaults
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Mine a node — green "+X Material" popup should appear at the left side and fade
+3. Multiple quick breaks — popups should stack vertically without overlapping
+4. Test UTILS button shifts to TOOLS position when utilities panel opens
+5. Git commit
+
+---
+
+## 2026-07-02 (session 2) — UI polish: damage numbers, popups, toolbox redesign, parser fixes
+
+### Completed this session
+
+**Main.gd — skyline page**
+- `_lbl_new_contract_locked` font colour forced to `Color.WHITE` so "Reach Level 10 to sign a New Contract" text is readable on the green button
+
+**Main.gd — floating damage numbers**
+- Added `_spawn_dmg_number(canvas_pos, dmg)` — creates a `Label` child on the CanvasLayer, animates it upward 58px over 0.75s (QUAD OUT) and fades to transparent starting at 0.12s, then `queue_free`s after 0.82s
+- Called in `_apply_node_damage()` for both node-break and non-break hits; uses `_node_visuals[i]["container"].position` as anchor
+
+**Main.gd — Quick Pin menu**
+- Fixed "Done" button stuck mid-screen: `card_h` is now calculated dynamically from `rows_pre * tile_h_pre + (rows_pre-1)*pad_pre`, so card height expands with the grid
+- `done_y` computed as `grid_y + float(rows) * tile_h + float(rows - 1) * float(pad) + 12.0` (was a hardcoded offset)
+
+**Main.gd — wave-clear unlock popup**
+- Added `_show_unlock_popup(next_loc_id)`: CanvasLayer layer 42, dim ColorRect with `MOUSE_FILTER_IGNORE`, 500×210px card at y=220 (upper third), tap-the-card-to-close
+- Called from `_break_node` when `_wave_new_prog == _wthresh`
+- Removed 🔓 emoji icon (rendered as "g13" fallback glyph in Godot's default font)
+
+**Main.gd — tap-to-close on all popups**
+- Stats panel: `bg_btn` Button covers full screen, `✕` removed
+- Chest popup: `dim_btn` Button (full screen) closes on press; card has `MOUSE_FILTER_IGNORE`
+- Offline gains popup: dim Button calls `_on_offline_collect`
+- Unlock popup: card Button closes; dim has `MOUSE_FILTER_IGNORE` (card-only close)
+
+**Main.gd — toolbox panel redesign**
+- Rebuilt `_build_toolbox_panel()` as slim utilities-style tray (163px tall, no scrim, no ✕)
+- Icon row is 640px wide (`SCREEN_W - 80`) leaving an 80px gap on the right where the TOOLS float button remains visible
+- `_toolbox_float_cl.layer` raised from 9 → 25 (above tray at layer 23) so float button renders on top
+- `_on_menu_toolbox()` is now a toggle: hides panel if visible, opens if hidden
+- `_update_toolbox_panel()` updated — `count_lbl` removed from cells (null in new design)
+
+**Main.gd — parser error fixes**
+- File was truncated mid-line (at `mod_lbl.add_theme_`) inside `_update_vintage_chest_panel()`
+- Restored correct tail: closing lines of `for mod` loop + `_on_menu_vintage_chest()` function
+- `_on_menu_vintage_chest()` was the cause of "Identifier not declared in current scope" at line 1734
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Test mine screen — damage numbers should float up on each hit
+3. Open Quick Pin menu — Done button should be below the grid
+4. Clear a wave — unlock popup should appear; tapping card should dismiss it
+5. Open Toolbox — should show slim tray with TOOLS button visible in the 80px gap; tapping button again should close it
+6. Git commit
+
+---
+
+## 2026-07-02 — Mobile scaling, code audit fixes, crew rework, UI clipping fixes
+
+### Completed this session
+
+**project.godot**
+- Added `window/stretch/mode="canvas_items"` + `window/stretch/aspect="keep_width"` — game now fills any mobile screen width and expands height on tall phones instead of rendering at fixed 720×1280 in the corner
+
+**Main.gd — dynamic screen height**
+- `const SCREEN_H` → `var SCREEN_H: int = 1280` (dynamic)
+- `const MINE_H` → `var MINE_H: int = 994` (dynamic)
+- `_ready()` now reads `DisplayServer.window_get_size()` and calculates logical SCREEN_H and MINE_H before any UI is built
+- Fixed three function-level `const` declarations that referenced the now-var SCREEN_H/MINE_H (`SHEET_Y`, `BTN_Y`, `CARD_Y` → all changed to `var`)
+
+**Main.gd — code audit fixes (4 bugs)**
+- `_update_craft_panel()` rewritten: now updates all 16 inventory labels and all 8 recipe cards (was only updating 4 labels and 2 cards)
+- Blueprint fragment drops added to `_on_craft_all()` and `_on_craft_all_everything()` (was only in `_on_craft_one()`)
+- `_mat_color()` extended: added "brick", "plaster", "aluminium" entries
+- `_tier_colour()` extended: added apartment, retail, office, high_rise, skyscraper colours
+
+**Main.gd — location picker panel**
+- Rebuilt as full-width (was 660px on 720 screen causing text clipping and scrollbar overlap)
+- `horizontal_scroll_mode = SCROLL_MODE_DISABLED` added
+- VBox now uses `custom_minimum_size` instead of `size`
+- Progress count label moved above bar with 100px width; bar extends full width minus padding
+- `_on_loc_picker_open()` updated to pass `SCREEN_W` instead of hardcoded 660
+
+**Main.gd — crew location picker**
+- Rebuilt as full-width (was 580px card — same clipping issue)
+- `_on_crew_move_pressed()` updated to pass `0, 0, SCREEN_W`
+
+**Crew rework (3 files)**
+- `CrewMemberResource.gd`: added `unlock_level: int = 1` export field
+- `BuildDatabase.gd`: `_crew()` helper gains `unlock_lvl` param; `_register_crew()` updated with level gates:
+  - Old Bob: Lv1, Granite Pete: Lv3, Nimble Nick: Lv5, Sandy Walsh: Lv7
+  - Iron Mike: Lv10, Clay Molly: Lv13, Copper Carl: Lv16, Lime Larry: Lv19, Boxy Dave: Lv22
+- `Main.gd`:
+  - Removed: `_crew_loc_labels`, `_crew_move_btns`, `_crew_loc_picker`, `_crew_loc_picker_for`, `_crew_loc_rows_node` vars
+  - Added: `_crew_lock_overlays: Array[Control]` (one dim overlay + lock label per card)
+  - Removed: `_build_crew_loc_picker()`, `_rebuild_crew_loc_rows()`, `_on_crew_move_pressed()`, `_on_crew_loc_selected()` functions
+  - `_build_crew_card()`: location badge static (no array), hire/upgrade buttons full-width (no move button), lock overlay added
+  - `_update_crew_panel()`: shows/hides lock overlay per card based on `player_level >= unlock_level`; skips button updates for locked cards
+  - `_on_hire_pressed()`: guards against locked crew
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Test on device — game should fill the full screen
+3. Open Crew panel — Old Bob available at start, Granite Pete locked until Lv3, etc.
+4. Reach Lv3 — confirm Granite Pete unlocks automatically (overlay hides, hire button appears)
+5. Open craft panel — all 8 recipe cards should show live "Will make:" counts
+6. Check location picker — full width, no text clipping, progress numbers visible
+7. Commit
+
+---
+
 ## 2026-07-01 — Big batch: wave-clear unlocks, hold-to-mine, Blasting Cap, chest system, 18 intro tasks, build cooldown fix, menu restructure
 
 ### Completed this session
@@ -48,26 +218,71 @@
 - `_on_menu_skill_tree()`: opens UPGRADES panel on SKILLS tab
 
 ### Currently in progress / left mid-task
-Utilities panel UI redesigned (2026-07-01 continuation). Needs Godot reload + test.
+All changes implemented. Needs Godot reload + test.
 
-### Utilities panel redesign (2026-07-01 continuation)
-- **UTILS float button** moved left: now sits at X=580, Y=1020 — side-by-side with TOOLS (X=650, Y=1020), no longer overlapping
-- **Utilities panel** slimmed to 160px height (was 480px), no scrim, no dark overlay — mine screen fully visible underneath
-- **Icon-only row** (top 72px): 56px icon buttons in a horizontal row; currently Blasting Cap (💥); designed to accept more icons
-- **Info bar** (bottom 84px): shows name + description + status when an icon is tapped; FIRE button appears only when an item is selected
-- Added member vars: `_util_selected: String`, `_util_info_name: Label`, `_util_info_desc: Label`
-- `_update_utilities_panel()` now checks `_util_selected` — shows blast cap info when tapped, "Tap a utility" prompt when nothing selected
-- `_on_menu_utilities()` resets `_util_selected = ""` on open
+### Additional changes (2026-07-02 — code review + fixes)
+
+**Main.gd — 4 bugs fixed from code audit**
+
+1. `_update_craft_panel()` rewritten — now updates all 16 inventory grid labels and all 8 recipe cards (yield labels + Craft 1 / Craft All button states). Previously only updated 4 labels and 2 cards; cards 3–8 were permanently stuck at "Will make: 0" with buttons disabled.
+
+2. Blueprint fragment drops added to `_on_craft_all()` and `_on_craft_all_everything()` — one 20% roll per base craft, matching the existing `_on_craft_one()` behaviour. Previously bulk crafting never awarded blueprint fragments.
+
+3. `_mat_color()` extended — added entries for "brick" → `C_BRICK`, "plaster" → `C_PLASTER`, "aluminium" → `C_ALUMINIUM`. Previously these fell through to `C_TEXT` (white).
+
+4. `_tier_colour()` extended — added colour entries for apartment, retail, office, high_rise, skyscraper. Previously all five returned grey.
 
 ### Next step
 1. Open Godot — confirm 0 parser errors
-2. On mine screen: tap ⚡ UTILS button (left of TOOLS, same row) — slim 160px tray should appear above bottom bar with mine screen visible behind it
-3. Tap 💥 icon — info bar should populate with "Blasting Cap", description, ready/cooldown status, and FIRE button
-4. Fire blast cap — info bar should flip to countdown; re-check after 30s shows READY again
-5. Mine screen: tap-hold a node — damage ticks continuously at tool speed rate
-6. Complete 30 wave clears at Lumber Yard — Stone Quarry unlocks
-7. Open menu — confirm MINE / TOOLBOX / TRADE SHOW / SHOP gone; SKILL TREE, MISSIONS, BLUEPRINTS, DELIVERY PALLETS, VINTAGE CHEST present
-8. Receive a chest — flash notification appears; open from menu panels
+2. Open Craft panel — all 8 recipe cards should show live "Will make:" counts and enabled buttons
+3. Craft using individual buttons and ⚡ CRAFT ALL — verify all inventory grid cells update (including sand/glass, steel_ore/steel_beam etc.)
+4. Commit
+
+---
+
+### Additional changes (2026-07-01 continuation session)
+
+**Button press animations**
+- Added `_make_animated_btn()` and `_wire_btn_anim()` helpers — scale-bounce on every button press (0.92× in 70ms, spring back 120ms)
+- Added `_wire_cell_anim(cell, btn)` for flat overlay buttons — animates the parent wrapper Control so visible siblings (bg + label) also bounce
+- All `Button.new()` calls replaced with `_make_animated_btn()` (56 buttons total)
+- Pin slots, menu grid items, toolbox cells, and utilities icon wrapped in Control nodes so animation affects full card visuals
+
+**Item stacking fix**
+- `_on_use_item()`: using the same toolbox item while a boost is active now stacks additively (extends timer by new duration + remaining; multiplier adds `mult - 1` per use)
+- Flash feedback now shows stacked multiplier and total remaining seconds
+
+**Blueprint Fragment gate**
+- `_award_blueprint_fragment()` and `_grant_blueprint_fragments()` now early-return if `GameState.skyline.size() < 15`
+
+**Unlock badge "Complete"**
+- `_update_next_unlock_badge()`: when `progress >= threshold`, shows `✔ Complete` in green instead of raw overflow number
+
+**HUD material chip fix**
+- `_update_hud()` now refreshes `_lbl_active_mat` with current material count + color (was stuck at "0 Timber" forever)
+
+**Chest system refactor — universal chests**
+- `GameState.pending_chests: Dictionary` replaced with `pending_delivery_pallets: int` + `pending_vintage_chests: int`
+- SaveManager updated for new fields
+- Spawn: chests now increment a universal counter instead of being tied to a location
+- `_on_chest_open_at(loc_id)` replaced with `_on_open_delivery_pallet_btn()` / `_on_open_vintage_chest_btn()`
+- Delivery Pallet panel: single row "📦 N Delivery Pallets" + OPEN button
+- Vintage Chest panel: single row "🎁 N Vintage Tool Chests" + OPEN button
+
+**Vintage chest modifier display**
+- Fixed `mod.get("name")` → `mod.get("label")` (key was wrong)
+- Modifiers now grouped by `id`, values summed, sorted rare→uncommon→common
+- Display shows stacked total: e.g. "• XP Gain +40%  [RARE]  ×2" instead of two separate rows
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Test button bounce on bottom bar, menu grid, toolbox cells, utilities icon
+3. Use same toolbox item twice — multiplier should stack (e.g. "Mining Frenzy ×3.0 for 90s!")
+4. Confirm blueprint fragments not dropping before 15 buildings
+5. Unlock badge: check it shows "✔ Complete" when wave clears exceed threshold
+6. HUD chip top-right: verify updates live as you mine/sell materials
+7. Clear a wave — chest counter increments; open from DELIVERY PALLETS / VINTAGE CHEST menu
+8. Open vintage chest twice for same modifier — panel should show single stacked row (e.g. "Mine Power +10%  ×2")
 9. Commit once verified
 
 ---

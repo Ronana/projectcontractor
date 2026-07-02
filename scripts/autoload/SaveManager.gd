@@ -83,11 +83,15 @@ func save_game() -> void:
 		"materials_sold":        GameState.materials_sold,
 		"visited_stone_quarry":  GameState.visited_stone_quarry,
 		"visited_sand_pit":      GameState.visited_sand_pit,
-		"blasting_caps_fired":           GameState.blasting_caps_fired,
-		"blasting_cap_cooldown_until":   GameState.blasting_cap_cooldown_until,
+		"blasting_caps_fired":            GameState.blasting_caps_fired,
+		"utility_counts":                 GameState.utility_counts,
+		"utility_recharge_at":            GameState.utility_recharge_at,
+		"yield_charge_stacks":            GameState.yield_charge_stacks,
+		"apprentice_notice_stacks":       GameState.apprentice_notice_stacks,
 		# -- Chest system (permanent modifiers) --
 		"chest_modifiers":               GameState.chest_modifiers,
-		"pending_chests":                GameState.pending_chests,
+		"pending_delivery_pallets":      GameState.pending_delivery_pallets,
+		"pending_vintage_chests":        GameState.pending_vintage_chests,
 		"toolbox_items_used":    GameState.toolbox_items_used,
 		"delivery_pallets_opened": GameState.delivery_pallets_opened,
 		"vintage_chests_opened": GameState.vintage_chests_opened,
@@ -189,10 +193,25 @@ func load_game() -> void:
 	GameState.visited_stone_quarry   = int(d.get("visited_stone_quarry", 0))
 	GameState.visited_sand_pit       = int(d.get("visited_sand_pit", 0))
 	GameState.blasting_caps_fired            = int(d.get("blasting_caps_fired", 0))
-	GameState.blasting_cap_cooldown_until    = float(d.get("blasting_cap_cooldown_until", 0.0))
+	GameState.utility_counts                 = d.get("utility_counts", {})
+	GameState.utility_recharge_at            = d.get("utility_recharge_at", {})
+	GameState.yield_charge_stacks            = int(d.get("yield_charge_stacks", 0))
+	GameState.apprentice_notice_stacks       = int(d.get("apprentice_notice_stacks", 0))
+	# ── Migrate saves that predate the unified utility system ──────────────
+	var _def_counts := {"blast_cap": 200, "det_chord": 5, "yield_charge": 1,
+		"apprentice_notice": 1, "demo_order": 1, "supply_run": 1}
+	for _k: String in _def_counts:
+		if not GameState.utility_counts.has(_k):
+			GameState.utility_counts[_k] = _def_counts[_k]
+	# Carry over old blast_cap_count if present
+	if d.has("blast_cap_count"):
+		GameState.utility_counts["blast_cap"] = int(d.get("blast_cap_count", 200))
+	if d.has("blasting_cap_cooldown_until"):
+		GameState.utility_recharge_at["blast_cap"] = float(d.get("blasting_cap_cooldown_until", 0.0))
 	# -- Chest system --
 	GameState.chest_modifiers                = d.get("chest_modifiers", [])
-	GameState.pending_chests                 = d.get("pending_chests", {})
+	GameState.pending_delivery_pallets       = int(d.get("pending_delivery_pallets", 0))
+	GameState.pending_vintage_chests         = int(d.get("pending_vintage_chests", 0))
 	GameState.toolbox_items_used     = int(d.get("toolbox_items_used", 0))
 	GameState.delivery_pallets_opened = int(d.get("delivery_pallets_opened", 0))
 	GameState.vintage_chests_opened  = int(d.get("vintage_chests_opened", 0))
@@ -271,9 +290,14 @@ func _init_fresh_state() -> void:
 	GameState.visited_stone_quarry   = 0
 	GameState.visited_sand_pit       = 0
 	GameState.blasting_caps_fired            = 0
-	GameState.blasting_cap_cooldown_until    = 0.0
+	GameState.utility_counts                 = {"blast_cap": 200, "det_chord": 5,
+		"yield_charge": 1, "apprentice_notice": 1, "demo_order": 1, "supply_run": 1}
+	GameState.utility_recharge_at            = {}
+	GameState.yield_charge_stacks            = 0
+	GameState.apprentice_notice_stacks       = 0
 	GameState.chest_modifiers                = []
-	GameState.pending_chests                 = {}
+	GameState.pending_delivery_pallets       = 0
+	GameState.pending_vintage_chests         = 0
 	GameState.toolbox_items_used     = 0
 	GameState.delivery_pallets_opened = 0
 	GameState.vintage_chests_opened  = 0

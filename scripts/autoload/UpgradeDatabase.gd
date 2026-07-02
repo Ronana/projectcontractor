@@ -26,7 +26,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 1,
 		"effect":       "mine_power_pct",
 		"bonus":        0.10,
-		"base_cost":    {"cash": 25, "timber": 20},
+		"base_cost":    {"cash": 50},
 	},
 	{
 		"id":           "cash_bonus",
@@ -36,7 +36,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 2,
 		"effect":       "stage_cash_pct",
 		"bonus":        0.10,
-		"base_cost":    {"cash": 35, "stone": 20},
+		"base_cost":    {"cash": 60},
 	},
 	{
 		"id":           "quick_crew",
@@ -46,7 +46,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 3,
 		"effect":       "worker_rate_pct",
 		"bonus":        0.08,
-		"base_cost":    {"cash": 40, "stone": 25},
+		"base_cost":    {"cash": 70},
 	},
 	{
 		"id":           "power_tools",
@@ -66,7 +66,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 5,
 		"effect":       "drop_bonus",
 		"bonus":        1.0,
-		"base_cost":    {"cash": 50, "timber": 35},
+		"base_cost":    {"cash": 90},
 	},
 	{
 		"id":           "xp_rush",
@@ -76,7 +76,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 6,
 		"effect":       "xp_pct",
 		"bonus":        0.15,
-		"base_cost":    {"cash": 60, "timber": 20, "stone": 20},
+		"base_cost":    {"cash": 110},
 	},
 	{
 		"id":           "extra_node_slot",
@@ -86,7 +86,7 @@ const UPGRADES: Array[Dictionary] = [
 		"unlock_level": 7,
 		"effect":       "extra_node_slot",
 		"bonus":        1.0,
-		"base_cost":    {"cash": 80, "timber": 50, "stone": 30},
+		"base_cost":    {"cash": 150},
 	},
 	{
 		"id":           "double_craft",

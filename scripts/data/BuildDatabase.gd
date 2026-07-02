@@ -174,13 +174,13 @@ func _register_shed() -> void:
 	shed.unlock_condition = "none"
 	shed.stages = [
 		_stage("shed_clearance",   "Site Clearance & Groundworks",
-			{"timber": 20},                     0),
+			{"lumber": 7},                      0),
 		_stage("shed_foundations", "Foundations & Base",
-			{"stone": 30, "timber": 10},         1),
+			{"concrete": 13},                    1),
 		_stage("shed_framing",     "Wall Framing & Sheathing",
-			{"timber": 40, "stone": 10},         2),
+			{"lumber": 14, "concrete": 4},       2),
 		_stage("shed_finish",      "Roof, Door & Snagging",
-			{"timber": 20, "stone": 15},         3),
+			{"lumber": 7,  "concrete": 5},       3),
 	]
 	_tiers["shed"] = shed
 
@@ -192,9 +192,9 @@ func _register_single_house() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("sh_clearance",   "Site Clearance & Groundworks",
-			{"timber": 40, "stone": 25},           0),
+			{"lumber": 14, "concrete": 9},         0),
 		_stage("sh_foundations", "Foundations & Footings",
-			{"concrete": 20, "stone": 15},         1),
+			{"concrete": 25},                      1),
 		_stage("sh_framing",     "Ground Floor Framing",
 			{"lumber": 35, "concrete": 10},        2),
 		_stage("sh_sheathing",   "Wall Sheathing & Roof",
@@ -212,9 +212,9 @@ func _register_two_story_house() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("th_clearance",   "Site Clearance & Groundworks",
-			{"timber": 50, "stone": 35},           0),
+			{"lumber": 17, "concrete": 12},        0),
 		_stage("th_foundations", "Foundations",
-			{"concrete": 35, "stone": 20},          1),
+			{"concrete": 42},                       1),
 		_stage("th_gf_framing",  "Ground Floor Framing",
 			{"lumber": 50, "concrete": 25},         2),
 		_stage("th_ff_roof",     "First Floor, Joists & Roof",
@@ -232,9 +232,9 @@ func _register_apartment_block() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("ab_clearance",   "Site Clearance & Groundworks",
-			{"timber": 80, "stone": 60},                     0),
+			{"lumber": 27, "concrete": 20},                  0),
 		_stage("ab_foundations", "Deep Foundations",
-			{"concrete": 60, "stone": 50},                   1),
+			{"concrete": 77},                                 1),
 		_stage("ab_gf_struct",   "Ground Floor Structure",
 			{"lumber": 80, "concrete": 60},                  2),
 		_stage("ab_floors",      "Upper Floors & Lifts",
@@ -254,9 +254,9 @@ func _register_retail_unit() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("ru_clearance",   "Site Clearance & Services",
-			{"timber": 120, "stone": 80},                        0),
+			{"lumber": 40, "concrete": 27},                      0),
 		_stage("ru_foundations", "Foundations & Ground Slab",
-			{"concrete": 100, "stone": 60},                      1),
+			{"concrete": 120},                                    1),
 		_stage("ru_frame",       "Steel Frame Assembly",
 			{"steel_beam": 30, "concrete": 80},                  2),
 		_stage("ru_roof",        "Roof Deck & Structure",
@@ -276,9 +276,9 @@ func _register_office_block() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("ob_clearance",   "Site Clearance & Demolition",
-			{"timber": 150, "stone": 120},                       0),
+			{"lumber": 50, "concrete": 40},                      0),
 		_stage("ob_foundations", "Piled Foundations",
-			{"concrete": 140, "stone": 80},                      1),
+			{"concrete": 165},                                    1),
 		_stage("ob_frame",       "Steel Frame & Core",
 			{"steel_beam": 60, "concrete": 100},                 2),
 		_stage("ob_floors",      "Floor Plates & Staircases",
@@ -300,9 +300,9 @@ func _register_high_rise() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("hr_clearance",   "Site Preparation & Hoarding",
-			{"timber": 200, "stone": 150},                          0),
+			{"lumber": 67, "concrete": 50},                         0),
 		_stage("hr_foundations", "Deep Pile Foundations",
-			{"concrete": 180, "stone": 100},                        1),
+			{"concrete": 215},                                       1),
 		_stage("hr_core",        "Core Structure & Lift Shafts",
 			{"steel_beam": 90, "concrete": 150},                    2),
 		_stage("hr_slabs",       "Floor Slabs ×20",
@@ -324,9 +324,9 @@ func _register_skyscraper() -> void:
 	h.unlock_condition = "build_power"
 	h.stages = [
 		_stage("sk_site",        "Site Acquisition & Set-Up",
-			{"timber": 250, "stone": 200},                            0),
+			{"lumber": 84, "concrete": 67},                           0),
 		_stage("sk_foundation",  "Mega-Foundation",
-			{"concrete": 250, "stone": 150},                          1),
+			{"concrete": 300},                                         1),
 		_stage("sk_core",        "Core Structure & Podium",
 			{"steel_beam": 130, "concrete": 220},                     2),
 		_stage("sk_tower",       "Tower Structure",
@@ -442,20 +442,21 @@ func _register_locations() -> void:
 ## Converted to HP/s in Main.gd: hp_per_s = bonus × level × 4.
 
 func _register_crew() -> void:
+	#                  id               name            mat          loc                  cost  bonus  unlock_lvl
 	_crew_templates = [
-		_crew("old_bob",      "Old Bob",      "timber",     "lumber_yard",       40,  0.5),
-		_crew("granite_pete", "Granite Pete", "stone",      "stone_quarry",      75,  1.0),
-		_crew("nimble_nick",  "Nimble Nick",  "timber",     "lumber_yard",       90,  1.0),
-		_crew("sandy_walsh",  "Sandy Walsh",  "sand",       "sand_pit",          70,  0.8),
-		_crew("iron_mike",    "Iron Mike",    "steel_ore",  "steel_yard",        110, 1.0),
-		_crew("clay_molly",   "Clay Molly",   "clay",       "clay_pit",          90,  0.8),
-		_crew("copper_carl",  "Copper Carl",  "copper_ore", "copper_mine",       120, 0.9),
-		_crew("lime_larry",   "Lime Larry",   "limestone",  "limestone_quarry",  140, 1.0),
-		_crew("boxy_dave",    "Boxy Dave",    "bauxite",    "bauxite_mine",      160, 1.1),
+		_crew("old_bob",      "Old Bob",      "timber",     "lumber_yard",       40,  0.5,  1),
+		_crew("granite_pete", "Granite Pete", "stone",      "stone_quarry",      75,  1.0,  3),
+		_crew("nimble_nick",  "Nimble Nick",  "timber",     "lumber_yard",       90,  1.0,  5),
+		_crew("sandy_walsh",  "Sandy Walsh",  "sand",       "sand_pit",          70,  0.8,  7),
+		_crew("iron_mike",    "Iron Mike",    "steel_ore",  "steel_yard",        110, 1.0,  10),
+		_crew("clay_molly",   "Clay Molly",   "clay",       "clay_pit",          90,  0.8,  13),
+		_crew("copper_carl",  "Copper Carl",  "copper_ore", "copper_mine",       120, 0.9,  16),
+		_crew("lime_larry",   "Lime Larry",   "limestone",  "limestone_quarry",  140, 1.0,  19),
+		_crew("boxy_dave",    "Boxy Dave",    "bauxite",    "bauxite_mine",      160, 1.1,  22),
 	]
 
 func _crew(id: String, crew_name: String, mat: String, loc: String,
-		cost: int, bonus: float) -> CrewMemberResource:
+		cost: int, bonus: float, unlock_lvl: int = 1) -> CrewMemberResource:
 	var c               := CrewMemberResource.new()
 	c.id               = id
 	c.display_name     = crew_name
@@ -464,6 +465,7 @@ func _crew(id: String, crew_name: String, mat: String, loc: String,
 	c.hire_cost        = cost
 	c.base_speed_bonus = bonus
 	c.level            = 1
+	c.unlock_level     = unlock_lvl
 	return c
 
 # ── Factory helpers ─────────────────────────────────────────────────────────

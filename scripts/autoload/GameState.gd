@@ -143,8 +143,9 @@ var visited_sand_pit: int = 0
 var blasting_caps_fired: int = 0
 
 # -- Chest system ------------------------------------------------------------
-## Pending chests per location: loc_id → chest_type ("delivery_pallet" | "vintage_chest" | "")
-var pending_chests: Dictionary = {}
+## Universal pending chest counts (not tied to location)
+var pending_delivery_pallets: int = 0
+var pending_vintage_chests:   int = 0
 ## Permanent stat modifiers from Vintage Tool Chests: Array of {effect, value, label, rarity}
 var chest_modifiers: Array = []
 
@@ -155,8 +156,18 @@ func get_chest_modifier_bonus(effect: String) -> float:
 		if m.get("effect", "") == effect:
 			total += float(m.get("value", 0.0))
 	return total
-## Unix timestamp when blasting cap cooldown expires (0 = ready).
-var blasting_cap_cooldown_until: float = 0.0
+## Unified utility charge stocks  {id -> count}.
+var utility_counts: Dictionary = {
+	"blast_cap": 200, "det_chord": 5,
+	"yield_charge": 1, "apprentice_notice": 1,
+	"demo_order": 1,  "supply_run": 1,
+}
+## Unix timestamps for next recharge per utility  {id -> float}. 0 = idle / full.
+var utility_recharge_at: Dictionary = {}
+## Stacked buff: next N node breaks give 2x material drops.
+var yield_charge_stacks: int = 0
+## Stacked buff: next N node breaks give 2x XP.
+var apprentice_notice_stacks: int = 0
 ## Total toolbox items ever used.
 var toolbox_items_used: int = 0
 ## Total delivery pallets ever opened (placeholder until chest system is implemented).

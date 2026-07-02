@@ -19,3 +19,5 @@ extends Resource
 ## Used by the mine tick to determine where HP damage is applied.
 ## E.g. "lumber_yard", "stone_quarry".
 @export var location_id: String = "lumber_yard"
+## Player level required before this crew member appears as hireable.
+@export var unlock_level: int = 1
