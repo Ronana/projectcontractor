@@ -6604,15 +6604,24 @@ func _update_next_unlock_badge() -> void:
 		_next_unlock_widget.visible = false
 		return
 	var next_id: String   = loc_order[loc_idx + 1]
+	# Hide badge when the next location is already unlocked
+	if _is_location_unlocked(next_id):
+		_next_unlock_widget.visible = false
+		return
+	_next_unlock_widget.visible = true
 	var next_data         := BuildDatabase.get_location(next_id)
 	var threshold: int    = BuildDatabase.LOCATION_UNLOCK_NODES[loc_idx]
 	var progress: int     = int(GameState.location_unlock_progress.get(loc_id, 0))
 	var accent            := _mat_color(BuildDatabase.get_location(loc_id).get("material", "timber"))
-	_lbl_nu_progress.text = "%d / %d" % [progress, threshold]
+	if progress >= threshold:
+		_lbl_nu_progress.text = "✔ Complete"
+		_lbl_nu_progress.add_theme_color_override("font_color", Color(0.3, 1.0, 0.5))
+	else:
+		var pct := clampf(float(progress) / float(threshold), 0.0, 1.0)
+		_lbl_nu_progress.text = "%d / %d" % [progress, threshold]
+		_lbl_nu_progress.add_theme_color_override("font_color", accent.lerp(Color(0.3, 1.0, 0.5), pct))
+		_nu_prog_bg.color = accent.lerp(Color(0.2, 0.9, 0.4), pct) * Color(1,1,1,0.3)
 	_lbl_nu_name.text     = "→ " + next_data.get("display_name", next_id)
-	var pct := clampf(float(progress) / float(threshold), 0.0, 1.0)
-	_nu_prog_bg.color = accent.lerp(Color(0.2, 0.9, 0.4), pct) * Color(1,1,1,0.3)
-	_lbl_nu_progress.add_theme_color_override("font_color", accent.lerp(Color(0.3, 1.0, 0.5), pct))
 	(_next_unlock_widget.get_node("TopBar") as ColorRect).color = accent
 
 
