@@ -29,20 +29,20 @@ var MINE_H:   int  = 994
 ## Special keys: "_congrats" = final thank-you display (never auto-advances).
 const INTRO_TASKS: Array = [
 	{"text": "Collect 15 Timber",                                        "key": "timber_collected",       "target": 15},
-	{"text": "Craft 5 Lumber  (Unlocks Craft)",                          "key": "lumber_crafted",         "target": 5},
-	{"text": "Upgrade Tools  (Unlocks Upgrades)",                        "key": "sharper_tools_level",    "target": 1},
+	{"text": "Craft 5 Lumber",                                           "key": "lumber_crafted",         "target": 5},
+	{"text": "Upgrade Tools",                                            "key": "sharper_tools_level",    "target": 1},
 	{"text": "Fire 5 Blasting Caps",                                     "key": "blasting_caps_fired",    "target": 5},
 	{"text": "Go to Stone Quarry",                                       "key": "visited_stone_quarry",   "target": 1},
 	{"text": "Upgrade Tools to Level 3",                                 "key": "sharper_tools_level",    "target": 3},
-	{"text": "Open a Delivery Pallet  (Unlocks Delivery Pallets)",       "key": "delivery_pallets_opened","target": 1},
+	{"text": "Open a Delivery Pallet",                                   "key": "delivery_pallets_opened","target": 1},
 	{"text": "Use 3 Toolbox Items",                                      "key": "toolbox_items_used",     "target": 3},
-	{"text": "Open a Vintage Tool Chest  (Unlocks Vintage Tool Chests)", "key": "vintage_chests_opened",  "target": 1},
+	{"text": "Open a Vintage Tool Chest",                                "key": "vintage_chests_opened",  "target": 1},
 	{"text": "Go to Sand Pit",                                           "key": "visited_sand_pit",       "target": 1},
 	{"text": "Collect 25 Sand",                                          "key": "sand_collected",         "target": 25},
 	{"text": "Upgrade Tools to Level 5",                                 "key": "sharper_tools_level",    "target": 5},
-	{"text": "Build a Structure  (Unlocks Build Menu)",                  "key": "buildings_built",        "target": 1},
-	{"text": "Sell Materials  (Unlocks Sell)",                           "key": "materials_sold",         "target": 1},
-	{"text": "Hire a Worker  (Unlocks Crew)",                            "key": "crew",                   "target": 1},
+	{"text": "Build a Structure",                                        "key": "buildings_built",        "target": 1},
+	{"text": "Sell Materials",                                           "key": "materials_sold",         "target": 1},
+	{"text": "Hire a Worker",                                            "key": "crew",                   "target": 1},
 	{"text": "Reach Player Level 20",                                    "key": "player_level",           "target": 20},
 	{"text": "Sign a New Contract",                                      "key": "contract_count",         "target": 1},
 	{"text": "Thank you for playing the tutorial — enjoy the game!",     "key": "_congrats",              "target": 1},
@@ -422,6 +422,11 @@ var _mission_countdown_timer: float = 0.0
 func _process(delta: float) -> void:
 	_tick_workers(delta)
 	_tick_property_income(delta)
+
+	# Accelerate all cooldowns when Time Warp is active
+	var _gs_mult := GameState.get_game_speed_mult()
+	if _gs_mult > 1.0:
+		_tick_game_speed_cooldowns(delta * (_gs_mult - 1.0))
 
 	# Hold-to-mine: continuously apply damage while finger is held down
 	if _mine_hold_active:
@@ -3003,6 +3008,7 @@ func _build_upgrade_card(parent: VBoxContainer, u: Dictionary) -> Dictionary:
 	return {
 		"id":         u["id"],
 		"outer":      outer,
+		"sep":        sep,
 		"lock":       lock_stripe,
 		"name_lbl":   name_lbl,
 		"level_lbl":  level_lbl,
@@ -3996,7 +4002,8 @@ func _update_upgrades_panel() -> void:
 		var locked: bool       = GameState.player_level < unlock_level
 		var maxed: bool        = cur_level >= max_level
 
-		(card["lock"] as ColorRect).visible = locked
+		(card["outer"] as ColorRect).visible = not locked
+		(card["sep"]   as ColorRect).visible = not locked
 		(card["level_lbl"] as Label).text   = "Level %d / %d" % [cur_level, max_level]
 
 		if maxed:
@@ -4534,6 +4541,32 @@ func _on_level_up() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 # Worker tick
 # ══════════════════════════════════════════════════════════════════════════
+
+func _tick_game_speed_cooldowns(extra: float) -> void:
+	## Subtracts `extra` seconds from every active cooldown timestamp so they
+	## expire sooner when Time Warp (game_speed boost) is active.
+	var now := Time.get_unix_time_from_system()
+
+	# Utility recharge timestamps
+	for uid: String in GameState.utility_recharge_at.keys():
+		var rat: float = float(GameState.utility_recharge_at.get(uid, 0.0))
+		if rat > now:
+			GameState.utility_recharge_at[uid] = rat - extra
+
+	# Build site-prep cooldown
+	var scool: float = float(GameState.current_building.get("stage_cooldown_until", 0.0))
+	if scool > now:
+		GameState.current_building["stage_cooldown_until"] = scool - extra
+
+	# Other timed boosts (not game_speed itself — don't self-consume)
+	for eff: String in GameState.active_boosts.keys():
+		if eff == "game_speed":
+			continue
+		var bst: Dictionary = GameState.active_boosts[eff]
+		var exp: float = float(bst.get("expires_at", 0.0))
+		if exp > now:
+			bst["expires_at"] = exp - extra
+			GameState.active_boosts[eff] = bst
 
 func _tick_workers(delta: float) -> void:
 	if GameState.crew.is_empty():
@@ -6473,15 +6506,21 @@ func _build_boost_strip() -> void:
 	add_child(_boost_strip)
 
 	var strip_bg      := ColorRect.new()
-	strip_bg.color     = Color(0.05, 0.06, 0.10, 0.88)
+	strip_bg.color     = Color(0.04, 0.05, 0.09, 0.92)
 	strip_bg.position  = Vector2(0, MINE_Y)
-	strip_bg.size      = Vector2(SCREEN_W, 28)
+	strip_bg.size      = Vector2(SCREEN_W, 64)
 	_boost_strip.add_child(strip_bg)
 
+	var strip_border      := ColorRect.new()
+	strip_border.color     = Color(0.18, 0.20, 0.30, 1.0)
+	strip_border.position  = Vector2(0, MINE_Y + 63)
+	strip_border.size      = Vector2(SCREEN_W, 1)
+	_boost_strip.add_child(strip_border)
+
 	_boost_chip_box = HBoxContainer.new()
-	_boost_chip_box.position = Vector2(6, MINE_Y + 4)
-	_boost_chip_box.size     = Vector2(SCREEN_W - 12, 20)
-	_boost_chip_box.add_theme_constant_override("separation", 6)
+	_boost_chip_box.position = Vector2(8, MINE_Y + 6)
+	_boost_chip_box.size     = Vector2(SCREEN_W - 16, 52)
+	_boost_chip_box.add_theme_constant_override("separation", 8)
 	_boost_strip.add_child(_boost_chip_box)
 
 
@@ -6494,6 +6533,8 @@ func _update_boost_strip() -> void:
 
 	var now        := Time.get_unix_time_from_system()
 	var has_active := false
+	const CHIP_W   := 158
+	const CHIP_H   := 52
 
 	for effect_type: String in GameState.active_boosts.keys():
 		var b       : Dictionary = GameState.active_boosts[effect_type]
@@ -6503,28 +6544,91 @@ func _update_boost_strip() -> void:
 		has_active = true
 		var secs_left : int = int(expires - now)
 
+		# Look up item for display info + original duration
 		var chip_color := Color(0.60, 0.60, 0.70)
 		var chip_sym   := effect_type.left(1).to_upper()
+		var chip_name  := effect_type.replace("_", " ").capitalize()
+		var chip_dur   := 60
 		for it: Dictionary in ToolboxDatabase.get_all():
 			if it.get("effect", "") == effect_type:
 				chip_color = it.get("color", chip_color)
 				chip_sym   = it.get("symbol", chip_sym)
+				chip_name  = it.get("name", chip_name)
+				chip_dur   = int(it.get("duration", 60))
 				break
 
-		var chip      := ColorRect.new()
-		chip.color     = chip_color.darkened(0.55)
-		chip.custom_minimum_size = Vector2(72, 20)
-		_boost_chip_box.add_child(chip)
+		# ── Card container ──────────────────────────────────────────
+		var card      := Control.new()
+		card.custom_minimum_size = Vector2(CHIP_W, CHIP_H)
+		_boost_chip_box.add_child(card)
 
-		var chip_lbl      := Label.new()
-		chip_lbl.text      = "%s %ds" % [chip_sym, secs_left]
-		chip_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		chip_lbl.vertical_alignment   = VERTICAL_ALIGNMENT_CENTER
-		chip_lbl.position  = Vector2.ZERO
-		chip_lbl.size      = Vector2(72, 20)
-		chip_lbl.add_theme_font_size_override("font_size", 15)
-		chip_lbl.add_theme_color_override("font_color", chip_color)
-		chip.add_child(chip_lbl)
+		# Background with subtle color tint
+		var bg      := ColorRect.new()
+		bg.color     = chip_color.lerp(Color(0.06, 0.08, 0.12), 0.80)
+		bg.position  = Vector2.ZERO
+		bg.size      = Vector2(CHIP_W, CHIP_H)
+		card.add_child(bg)
+
+		# Left accent bar
+		var accent      := ColorRect.new()
+		accent.color     = chip_color
+		accent.position  = Vector2.ZERO
+		accent.size      = Vector2(4, CHIP_H)
+		card.add_child(accent)
+
+		# Symbol (large, left side)
+		var sym_lbl      := Label.new()
+		sym_lbl.text      = chip_sym
+		sym_lbl.position  = Vector2(10, 4)
+		sym_lbl.size      = Vector2(26, CHIP_H - 8)
+		sym_lbl.add_theme_font_size_override("font_size", 24)
+		sym_lbl.add_theme_color_override("font_color", chip_color)
+		sym_lbl.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		sym_lbl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		card.add_child(sym_lbl)
+
+		# Vertical divider after symbol
+		var div      := ColorRect.new()
+		div.color     = chip_color.lerp(Color(0.1, 0.1, 0.1), 0.70)
+		div.position  = Vector2(40, 6)
+		div.size      = Vector2(1, CHIP_H - 12)
+		card.add_child(div)
+
+		# Item name
+		var name_lbl      := Label.new()
+		name_lbl.text      = chip_name
+		name_lbl.position  = Vector2(46, 6)
+		name_lbl.size      = Vector2(CHIP_W - 50, 18)
+		name_lbl.add_theme_font_size_override("font_size", 13)
+		name_lbl.add_theme_color_override("font_color", Color(0.80, 0.82, 0.90))
+		card.add_child(name_lbl)
+
+		# Countdown timer
+		var mins := secs_left / 60
+		var secs := secs_left % 60
+		var time_str := "%dm %02ds" % [mins, secs] if mins > 0 else "%ds" % secs_left
+		var time_lbl      := Label.new()
+		time_lbl.text      = time_str
+		time_lbl.position  = Vector2(46, 26)
+		time_lbl.size      = Vector2(CHIP_W - 50, 20)
+		time_lbl.add_theme_font_size_override("font_size", 16)
+		time_lbl.add_theme_color_override("font_color", chip_color)
+		card.add_child(time_lbl)
+
+		# Progress bar background (bottom strip)
+		var bar_bg      := ColorRect.new()
+		bar_bg.color     = Color(0.0, 0.0, 0.0, 0.6)
+		bar_bg.position  = Vector2(4, CHIP_H - 5)
+		bar_bg.size      = Vector2(CHIP_W - 4, 5)
+		card.add_child(bar_bg)
+
+		# Progress bar fill (depletes left→right as time runs out)
+		var pct := clampf(float(secs_left) / float(max(chip_dur, 1)), 0.0, 1.0)
+		var bar_fill      := ColorRect.new()
+		bar_fill.color     = chip_color
+		bar_fill.position  = Vector2(4, CHIP_H - 5)
+		bar_fill.size      = Vector2((CHIP_W - 4) * pct, 5)
+		card.add_child(bar_fill)
 
 	_boost_strip.visible = has_active
 
@@ -7395,6 +7499,8 @@ func _update_blueprints_panel() -> void:
 
 ## Award one blueprint fragment, level up if threshold reached, then save.
 func _award_blueprint_fragment(bp_id: String) -> void:
+	if GameState.skyline.size() < 15:
+		return   # blueprints locked until 15 buildings complete
 	var bp := BlueprintDatabase.get_blueprint(bp_id)
 	if bp.is_empty():
 		return
@@ -7430,6 +7536,8 @@ func _award_blueprint_fragment(bp_id: String) -> void:
 ## Silently awards `count` blueprint fragments without showing a fragment popup.
 ## Handles level-ups automatically. Used by inspection reward logic.
 func _grant_blueprint_fragments(bp_id: String, count: int) -> void:
+	if GameState.skyline.size() < 15:
+		return   # blueprints locked until 15 buildings complete
 	var bp := BlueprintDatabase.get_blueprint(bp_id)
 	if bp.is_empty():
 		return
@@ -8015,7 +8123,7 @@ func _update_vintage_chest_panel() -> void:
 		row.add_child(bar)
 
 		var lbl      := Label.new()
-		lbl.text      = "\U0001f381  %d Vintage Tool Chest%s" % [count, "s" if count > 1 else ""]
+		lbl.text      = "%d Vintage Tool Chest%s" % [count, "s" if count > 1 else ""]
 		lbl.position  = Vector2(20, 12)
 		lbl.size      = Vector2(380, 30)
 		lbl.add_theme_font_size_override("font_size", 22)
@@ -8051,7 +8159,7 @@ func _update_vintage_chest_panel() -> void:
 		for mod: Dictionary in GameState.chest_modifiers:
 			var mod_lbl      := Label.new()
 			var rarity_col   := ChestDatabase.rarity_color(mod.get("rarity", "common"))
-			mod_lbl.text      = "\u2022 %s  [%s]" % [mod.get("name", "?"), mod.get("rarity", "?").to_upper()]
+			mod_lbl.text      = "\u2022 %s  [%s]" % [mod.get("label", "?"), mod.get("rarity", "?").to_upper()]
 			mod_lbl.position  = Vector2(16, 0)
 			mod_lbl.size      = Vector2(SCREEN_W - 32, 28)
 			mod_lbl.add_theme_font_size_override("font_size", 15)

@@ -9,6 +9,7 @@ extends Node
 ##   xp_mult       — multiplies GameState.get_xp_mult()
 ##   drop_bonus    — flat addition to GameState.get_drop_bonus()
 ##   stage_cash    — multiplies GameState.get_stage_cash_mult()
+##   game_speed    — multiplies mine_power + worker_rate + build_power simultaneously
 ##   instant_wave  — immediately clears + respawns active-location nodes (no duration)
 
 const ITEMS: Array[Dictionary] = [
@@ -115,6 +116,19 @@ const ITEMS: Array[Dictionary] = [
 		"rarity":   "rare",
 		"gem_cost": 3,
 		"symbol":   "!",
+	},
+	{
+		"id":       "time_warp",
+		"name":     "Time Warp",
+		"desc":     "2x mine speed, workers & build power for 30s",
+		"effect":   "game_speed",
+		"mult":     2.0,
+		"flat":     0,
+		"duration": 30,
+		"color":    Color(1.00, 0.30, 0.85),
+		"rarity":   "rare",
+		"gem_cost": 4,
+		"symbol":   "2x",
 	},
 ]
 

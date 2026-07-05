@@ -36,9 +36,9 @@ ChestDatabase="*res://scripts/autoload/ChestDatabase.gd"
 window/size/viewport_width=720
 window/size/viewport_height=1280
 window/size/resizable=false
-window/handheld/orientation=1
 window/stretch/mode="canvas_items"
 window/stretch/aspect="keep_width"
+window/handheld/orientation=1
 
 [physics]
 

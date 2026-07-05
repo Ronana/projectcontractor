@@ -2,6 +2,59 @@
 
 ---
 
+## 2026-07-05 (session 5) — Parser fixes, unlock badge, blueprint gate, chest display, boost chip redesign, Time Warp item
+
+### Completed this session
+
+**Main.gd — parser errors cleared (50+ errors)**
+- `_wire_scroll_drag(sc)` — function was called 8× but never defined; added pass-through stub (Godot 4 handles ScrollContainer touch drag natively)
+- `const SHEET_Y / BTN_Y / CARD_Y` → `var` — referenced class-level `var SCREEN_H/MINE_H` which aren’t compile-time constants
+- `const DP_ACCENT := Color(0.90, 0.65, 0.20)` added at class scope before `_build_delivery_pallet_panel`
+- `_update_delivery_pallet_panel` rewritten to use `GameState.pending_delivery_pallets: int` (universal counter) + `_on_open_delivery_pallet_btn()` — old per-location `pending_chests` dict loop removed
+
+**Main.gd — waves-to-unlock badge fix**
+- `_update_next_unlock_badge()` was showing "82 / 30 → Stone Quarry" even when Stone Quarry was already unlocked
+- Now calls `_is_location_unlocked(next_id)` first and hides badge when already unlocked
+- Shows "✔ Complete" in green if progress >= threshold (edge case before hide kicks in)
+
+**Main.gd — blueprint fragment gate restored**
+- `_award_blueprint_fragment()` and `_grant_blueprint_fragments()` were missing the `GameState.skyline.size() < 15` early return
+- Gate re-added to both functions; no fragments drop before 15 buildings complete
+
+**Main.gd — vintage chest modifier display**
+- Modifier rows showed "? [COMMON]" because code used `mod.get("name", "?")` but ChestDatabase uses key `"label"`; fixed to `mod.get("label", "?")`
+- Row label used `\U0001f381` (rendered as "dz81"); replaced with plain text — emoji already in panel header
+
+**Main.gd — boost chip redesign**
+- Old: 72×20px flat rect with "E 48s" text
+- New: 158×52px styled card with left accent bar, large symbol, item name, countdown timer ("Xs" / "Xm Ys"), and depleting progress bar across bottom
+- Strip height increased 28px → 64px; added 1px border at base
+- Progress bar calculated from `chip_dur` (ToolboxDatabase item duration) vs remaining seconds
+
+**ToolboxDatabase.gd — Time Warp item added (9th item)**
+- `id: "time_warp"`, effect: `"game_speed"`, mult: 2.0, duration: 30s, gem_cost: 4, rarity: rare
+- Hot-pink color (`Color(1.00, 0.30, 0.85)`), symbol "2x"
+
+**GameState.gd — game_speed boost wired to all stats**
+- `get_mine_power()`, `get_worker_rate_mult()`, `get_build_power()` all multiply by `get_boost_mult("game_speed")`
+- `get_game_speed_mult()` helper added (delegates to `get_boost_mult("game_speed")`)
+- Duplicate `get_game_speed_mult` at line 208 removed (Python script); single definition remains at line 208
+
+**Main.gd — `_tick_game_speed_cooldowns(extra)` (new function)**
+- Subtracts `delta * (mult - 1)` per frame from all timestamp-based cooldowns when Time Warp active
+- Accelerates: `utility_recharge_at` per utility, `stage_cooldown_until` on current_building, `expires_at` on all non-game_speed active boosts
+
+**Main.gd — `_process()` wired**
+- Calls `_tick_game_speed_cooldowns(delta * (mult - 1))` each frame when `get_game_speed_mult() > 1.0`
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. Use an Energy Drink — boost chip should show styled card with name, symbol, timer, and progress bar depleting
+3. Use Time Warp — all cooldowns (utility recharge, build site prep, other boosts) should run at 2× speed
+4. Open VINTAGE TOOL CHEST panel — modifier names should show (e.g. "Mine Power +10%") not "?"
+5. Check waves-to-unlock badge hides once you’ve crossed the threshold
+6. Confirm blueprint fragments not dropping before 15 buildings
+7. Git commit
 ## 2026-07-02 (session 4) — Accumulator popups, skyline level cap, file reconstruction
 
 ### Completed this session

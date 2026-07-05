@@ -205,6 +205,10 @@ func get_boost_flat(boost_type: String) -> int:
 
 ## Derived stat: sum of all hired crew member levels,
 ## multiplied by the Power Tools upgrade bonus and any active build_power boost.
+func get_game_speed_mult() -> float:
+	## Returns the current game-speed multiplier (1.0 when no Time Warp active).
+	return get_boost_mult("game_speed")
+
 func get_build_power() -> int:
 	var total := 0
 	for member: Dictionary in crew:
@@ -212,7 +216,7 @@ func get_build_power() -> int:
 	var mult := 1.0 + UpgradeDatabase.get_total_bonus("power_tools", upgrades.get("power_tools", 0))
 	mult *= 1.0 + get_skill_bonus("build_power_pct")
 	mult *= 1.0 + get_chest_modifier_bonus("build_power_pct")
-	return max(int(float(total) * mult * get_boost_mult("build_power")), 0)
+	return max(int(float(total) * mult * get_boost_mult("build_power") * get_boost_mult("game_speed")), 0)
 
 ## Derived stat: damage per tap to ore nodes.
 ## Stacks Sharper Tools upgrade + Veteran Foreman artifact.
@@ -222,14 +226,15 @@ func get_mine_power() -> int:
 	mult *= 1.0 + ArtifactDatabase.get_total_bonus("veteran_foreman", artifacts.get("veteran_foreman", 0))
 	mult *= 1.0 + get_skill_bonus("mine_power_pct")
 	mult *= 1.0 + get_chest_modifier_bonus("mine_power_pct")
-	return max(int(float(base) * mult * get_boost_mult("mine_power")), 1)
+	return max(int(float(base) * mult * get_boost_mult("mine_power") * get_boost_mult("game_speed")), 1)
 
 ## Multiplier applied to worker HP/s from the Quick Crew upgrade + active boost.
 func get_worker_rate_mult() -> float:
 	return (1.0 + UpgradeDatabase.get_total_bonus("quick_crew", upgrades.get("quick_crew", 0)) \
 		+ get_skill_bonus("worker_rate_pct") \
 		+ get_chest_modifier_bonus("worker_rate_pct")) \
-		* get_boost_mult("worker_rate")
+		* get_boost_mult("worker_rate") \
+		* get_boost_mult("game_speed")
 
 ## Flat bonus drops per node break. Stacks Bonus Drop upgrade + artifact + active boost.
 func get_drop_bonus() -> int:
