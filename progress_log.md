@@ -1,6 +1,112 @@
 # Project Contractor — Progress Log
 
+## Session 9 — 2026-07-07
+
+### Completed
+- **Const→var fixes**: Five local `const` variables inside functions (`SY`, `SH`, `BY`, `NW_Y`, `POP_Y`) that referenced now-`var` layout constants were changed to `var`. Cleared downstream "Nil operand" Vector2 errors.
+- **Colour palette consolidation**: Reduced accent colours to 3 — Primary `C_GOLD`, Alert `C_ALERT` (costs/warnings), gem currency `C_GEM`. All panel headers unified to `C_GOLD`. `_shortcut_color()` collapsed to always return `C_GOLD`. Added `C_ALERT = Color(1.00, 0.45, 0.15)` constant.
+- **MORE menu icon-grid redesign (IOM-style)**: `_rebuild_menu_items()` completely replaced with a 4-column icon grid using sections (DAILY WORK / PROGRESS / ITEMS & MORE). Each cell has an 82×82px icon background with a gold top bar, icon/initials, and name label. Locked items shown dimmed.
+- **SHOP item added to menu**: `_on_menu_shop()` added; SHOP item in DAILY WORK section with chest icon.
+- **Animated chest icon (SHOP)**: SHOP icon path changed from static PNG to `res://assets/sprites/ui/menu/chest/` (animation directory). Icon rendering now detects paths ending with `/` and builds an `AnimatedSprite2D` from all PNGs in the directory (sorted alphabetically = frame order). 10 fps, looping. Falls back to static TextureRect or initials if animation fails. 11 frames at `assets/sprites/ui/menu/chest/Metal Chest - frame  0N.png`.
+
+### Additional work (session 9 continued)
+- **Animated chest fixed**: `AnimatedSprite2D` (Node2D) inside Control caused invisible sprite. Replaced with `TextureRect` + `Timer` (pure Control nodes). Shows frame 0 on open, starts cycling on tap.
+- **Chest icon moved to CHEST button** (not SHOP — user correction).
+- **Icon size reduced 25%**: `anim_sf * 0.75` applied to animated icon scale.
+- **Chest opening popup**: New `_show_animated_opening_popup(anim_dir, reward_lines, accent)` — plays animation centred on screen, rewards below, COLLECT button. Plays once at 5fps (0.2s/frame), holds last frame. Both vintage chest and delivery pallet use it.
+- **Delivery animation**: Added `assets/sprites/ui/menu/delivery/` (5 frames: Golden Chest 3). DELIVERY menu icon and pallet opening popup both use it.
+- **DELIVERY menu icon** wired to `res://assets/sprites/ui/menu/delivery/` (animated).
+- **BLUEPRINTS icon**: Static `blueprints/blueprint.png`.
+- **SELL icon**: Static `sell/sell.png`.
+- **Gem HUD chip**: Replaced `◆` text symbol with `sell.png` icon (TextureRect, left side of chip) + right-aligned number label. `_update_hud()` now writes plain number (no ◆ prefix).
+
+### In Progress / Next Step
+- Open Godot — confirm 0 parser errors.
+- Check HUD: gem chip should show sell.png icon + number.
+- Open MORE menu: DELIVERY, CHEST show animations on tap; BLUEPRINTS and SELL show static icons.
+- Open CHEST → OPEN: animated chest plays once, rewards below.
+- Git commit once confirmed.
+
 ---
+
+## Session 8 — 2026-07-06
+
+### Completed
+- **DPI-aware UI scaling**: Added `var UI_SCALE: float = 1.0` class var to Main.gd.
+- In `_ready()`, compute `UI_SCALE = clamp(screen_get_dpi() / 300.0, 1.0, 1.5)`.
+  - S24 Ultra (~500 DPI): UI_SCALE ≈ 1.5 → elements 50% larger.
+  - Desktop/editor (~96 DPI): clamped to 1.0, no change.
+- Changed `HUD_H`, `BOTTOM_BAR_H`, `LOC_BAR_H`, `MINE_Y` from `const` to `var`.
+- `BOTTOM_BAR_H` and `HUD_H` scaled by `UI_SCALE` (HUD capped at 1.25×) in `_ready()`.
+- `MINE_Y` and `MINE_H` recomputed after scaling.
+- Added `_apply_global_font_scale()`: post-build scan that multiplies all explicit
+  `font_size` overrides on Labels and Buttons by `UI_SCALE`. Called after `_apply_global_font()`.
+
+### In Progress / Next Step
+- Build and test on S24 Ultra to confirm UI elements are now a comfortable physical size.
+- If still too small, increase the `300.0` divisor in the UI_SCALE formula (lower value → larger scale).
+- If too large, increase the divisor or reduce the `1.5` cap.
+- Consider git commit once confirmed working on device.
+
+
+---
+
+## 2026-07-06 (session 7) — Mobile UI scaling fix (Samsung S24 Ultra)
+
+### Problem
+UI and buttons appeared far smaller on device than in the Godot editor. Root cause: Godot was either not applying the canvas_items stretch correctly, or `DisplayServer.window_get_size()` was returning physical pixels (1440×3088) which caused UI coordinate mismatch.
+
+### Completed
+
+**project.godot**
+- Added `window/size/mode=4` (exclusive fullscreen) — bypasses Samsung OneUI window chrome and forces true fullscreen
+- Added `window/dpi/allow_hidpi=true` — Godot now renders at the native device resolution without OS-level downsampling
+- Added `window/stretch/scale=1.0` (explicit, was defaulting implicitly)
+
+**Main.gd — `_ready()`**
+- Replaced `DisplayServer.window_get_size()` with `get_viewport().get_visible_rect().size`
+- Added `await get_tree().process_frame` before reading so the viewport is fully sized before any UI builds
+- `get_visible_rect().size` always returns logical viewport coordinates after stretch scaling — correct on all screen densities without any manual calculation
+- Old manual formula `SCREEN_H = int(win.y * 720 / win.x)` removed
+
+### Next step
+1. Export APK and test on S24 Ultra — UI should fill the full screen at correct proportions
+2. If still small: check Android export settings → Architectures (arm64), and verify `window/size/mode=4` takes effect
+3. Git commit once confirmed working
+
+## 2026-07-05 (session 6) — Locked upgrade hiding, skill tree icon redesign
+
+### Completed this session
+
+**Main.gd — locked upgrades now hidden (GENERAL tab)**
+- Previously: locked upgrades showed a dim overlay with "Locked" text
+- Now: locked cards + their separator lines are hidden entirely (`visible = false`) until the player hits the unlock level
+- Added `"sep"` key to `_upgrade_card` dict so both the card and its separator toggle together
+
+**Main.gd — skill tree redesigned (SKILLS tab)**
+- Replaced tall rectangular cards (92px each, very crowded) with compact icon nodes
+- Each node: 76×76px three-layer icon (shadow bg → coloured border → dark fill) + name label below
+- State colours:
+  - Purchased: border + fill glow in branch colour, "✓" in white
+  - Unlockable: branch-colour border, dark tinted fill, initials in branch colour
+  - Locked: near-invisible grey throughout
+- Connector between nodes: 5px line + 12×8px mid-diamond indicator; lights up in branch colour when node above is purchased
+- Branch headers: deeper dark background, 3px top accent + 2px left accent in branch colour
+- Tap any node → bottom detail card shows: skill name, description, cost/state, BUY button
+- Tapping left side of detail card dismisses it; switching to GENERAL tab hides it
+- `_skill_initials()` helper: takes first letter of each word for 2-letter monogram
+- `_build_skill_detail_card()` builds fixed 144px card outside the scroll area
+
+**GameState.gd — type fix**
+- `var bc := SkillDatabase.BRANCH_COLORS[...]` → `var bc: Color = SkillDatabase.BRANCH_COLORS.get(...)`
+  (Dictionary lookup returns Variant; explicit type avoids "Cannot infer type" error)
+
+### Next step
+1. Open Godot — confirm 0 parser errors
+2. GENERAL tab: upgrades you don't meet level for should be invisible
+3. SKILLS tab: icon nodes display with correct states; tap a node → detail card appears; BUY purchases the skill
+4. Buy a skill → node fills with branch colour, connector lights up, next node becomes available
+5. Git commit
 
 ## 2026-07-05 (session 5) — Parser fixes, unlock badge, blueprint gate, chest display, boost chip redesign, Time Warp item
 
