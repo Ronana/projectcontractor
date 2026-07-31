@@ -1662,7 +1662,13 @@ func _build_mine_area() -> void:
 	_blast_flash.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_blast_flash)
 
-	# Floating feedback label
+	# Floating feedback label — own high CanvasLayer so flash messages are
+	# visible above all panels/overlays (menu 30, pin panel 28, popups 42/45)
+	var feedback_cl      := CanvasLayer.new()
+	feedback_cl.name      = "FeedbackLayer"
+	feedback_cl.layer     = 55
+	add_child(feedback_cl)
+
 	_lbl_feedback                      = Label.new()
 	_lbl_feedback.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_lbl_feedback.position             = Vector2(0, MINE_Y + 30)
@@ -1670,7 +1676,8 @@ func _build_mine_area() -> void:
 	_lbl_feedback.modulate.a           = 0.0
 	_lbl_feedback.add_theme_font_size_override("font_size", 20)
 	_lbl_feedback.add_theme_color_override("font_color", C_GOLD)
-	add_child(_lbl_feedback)
+	_lbl_feedback.mouse_filter         = Control.MOUSE_FILTER_IGNORE
+	feedback_cl.add_child(_lbl_feedback)
 
 	# Full-area tap button (sits over everything in the mine zone)
 	var tap_btn      := _make_animated_btn()
