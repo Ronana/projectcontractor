@@ -3,7 +3,8 @@ extends Node
 ## Runs load_game() at startup, autosaves every 30 s, and saves on
 ## app-pause / window-close so no progress is lost on mobile.
 
-const SAVE_PATH := "user://save.json"
+## Where the save file lives. Tests point this elsewhere so they never touch the player's save.
+var save_path: String = "user://save.json"
 const AUTOSAVE_INTERVAL := 30.0
 
 var _autosave_timer: float = 0.0
@@ -99,39 +100,67 @@ func save_game() -> void:
 		"privacy_agreed":        GameState.privacy_agreed,
 	}
 
-	var file := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
-	if file:
-		file.store_string(JSON.stringify(data, "\t"))
-		file.close()
-	else:
+	# Write the new save to a temp file first, then swap it in. If the app is
+	# killed mid-write only the temp file is damaged; the previous save moves
+	# to the backup slot so there is always one complete save to fall back on.
+	var tmp_path := save_path + ".tmp"
+	var file := FileAccess.open(tmp_path, FileAccess.WRITE)
+	if not file:
 		push_error("SaveManager: could not open '%s' for writing (error %d)" \
-			% [SAVE_PATH, FileAccess.get_open_error()])
+			% [tmp_path, FileAccess.get_open_error()])
+		return
+	var written := file.store_string(JSON.stringify(data, "\t"))
+	file.close()
+	if not written:
+		push_error("SaveManager: failed writing '%s' -- keeping previous save." % tmp_path)
+		DirAccess.remove_absolute(tmp_path)
+		return
+	if FileAccess.file_exists(save_path):
+		DirAccess.remove_absolute(_backup_path())
+		DirAccess.rename_absolute(save_path, _backup_path())
+	var err := DirAccess.rename_absolute(tmp_path, save_path)
+	if err != OK:
+		push_error("SaveManager: could not move '%s' into place (error %d)" % [tmp_path, err])
+
+func _backup_path() -> String:
+	return save_path.get_basename() + ".bak.json"
+
+func _corrupt_path() -> String:
+	return save_path.get_basename() + ".corrupt.json"
+
+## Returns the parsed save at `path`, or {} if it is missing or unreadable.
+func _read_save(path: String) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		return {}
+	var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	return parsed if parsed is Dictionary else {}
+
+## JSON stores every number as a float; turn whole-number counts back into ints.
+func _int_values(src: Dictionary) -> Dictionary:
+	var out: Dictionary = {}
+	for k in src:
+		out[k] = int(src[k])
+	return out
 
 # ---------------------------------------------------------------------------
 func load_game() -> void:
-	if not FileAccess.file_exists(SAVE_PATH):
+	var d := _read_save(save_path)
+	if d.is_empty() and FileAccess.file_exists(save_path):
+		# Keep the damaged file so it can be inspected or repaired by hand —
+		# the next autosave would otherwise destroy it.
+		DirAccess.copy_absolute(save_path, _corrupt_path())
+		push_error("SaveManager: save file unreadable -- copied to '%s'." % _corrupt_path())
+	if d.is_empty():
+		d = _read_save(_backup_path())
+		if not d.is_empty():
+			push_warning("SaveManager: restored progress from backup save.")
+	if d.is_empty():
 		_init_fresh_state()
 		return
 
-	var file := FileAccess.open(SAVE_PATH, FileAccess.READ)
-	if not file:
-		push_error("SaveManager: could not open '%s' for reading." % SAVE_PATH)
-		_init_fresh_state()
-		return
-
-	var raw := file.get_as_text()
-	file.close()
-
-	var parser := JSON.new()
-	if parser.parse(raw) != OK:
-		push_error("SaveManager: JSON parse error in save file -- starting fresh.")
-		_init_fresh_state()
-		return
-
-	var d: Dictionary = parser.get_data()
 	GameState.cash                 = d.get("cash", 100)
 	GameState.gems                 = d.get("gems", 0)
-	GameState.materials            = d.get("materials", {})
+	GameState.materials            = _int_values(d.get("materials", {}))
 	GameState.crew                 = d.get("crew", [])
 	GameState.current_building     = d.get("current_building", _default_building())
 	GameState.skyline              = d.get("skyline", [])
@@ -146,13 +175,13 @@ func load_game() -> void:
 		GameState.current_building["stage_started"] = false
 	if not GameState.current_building.has("stage_progress"):
 		GameState.current_building["stage_progress"] = 0.0
-	GameState.upgrades            = d.get("upgrades", {})
+	GameState.upgrades            = _int_values(d.get("upgrades", {}))
 
 	# -- Permanent fields (always loaded, never reset by prestige) --
 	GameState.reputation_points   = int(d.get("reputation_points", 0))
 	GameState.contract_count      = int(d.get("contract_count", 0))
 	GameState.portfolio           = d.get("portfolio", [])
-	GameState.artifacts           = d.get("artifacts", {})
+	GameState.artifacts           = _int_values(d.get("artifacts", {}))
 	GameState.pinned_shortcuts    = d.get("pinned_shortcuts", ["build", "crew", "craft", "sell"])
 
 	# -- Missions (loaded but MissionManager will regenerate if timestamps expired) --
@@ -160,13 +189,22 @@ func load_game() -> void:
 	GameState.weekly_missions     = d.get("weekly_missions", [])
 	GameState.daily_reset_at      = float(d.get("daily_reset_at",  0.0))
 	GameState.weekly_reset_at     = float(d.get("weekly_reset_at", 0.0))
+	for m: Dictionary in GameState.daily_missions + GameState.weekly_missions:
+		for key: String in ["progress", "target", "reward_cash", "reward_gems"]:
+			m[key] = int(m.get(key, 0))
 
 	# -- Toolbox --
-	GameState.inventory           = d.get("inventory",     {})
+	GameState.inventory           = _int_values(d.get("inventory",     {}))
 	GameState.active_boosts       = d.get("active_boosts", {})
 
 	# -- Blueprints & Permits --
-	GameState.blueprints          = d.get("blueprints", {})
+	GameState.blueprints          = {}
+	for bp_id: String in d.get("blueprints", {}):
+		var bp_entry: Dictionary = d["blueprints"][bp_id]
+		GameState.blueprints[bp_id] = {
+			"level":     int(bp_entry.get("level", 0)),
+			"fragments": int(bp_entry.get("fragments", 0)),
+		}
 	GameState.permits             = d.get("permits",    [])
 	# -- First completions (permanent) --
 	GameState.first_completions      = d.get("first_completions", [])
@@ -179,6 +217,10 @@ func load_game() -> void:
 		"event_index": 0, "expires_at": 0.0,
 		"task_progress": {}, "claimed_rewards": [0, 0, 0],
 	})
+	var ts: Dictionary = GameState.trade_show_state
+	ts["event_index"]     = int(ts.get("event_index", 0))
+	ts["task_progress"]   = _int_values(ts.get("task_progress", {}))
+	ts["claimed_rewards"] = ts.get("claimed_rewards", [0, 0, 0]).map(func(v) -> int: return int(v))
 	# -- Skill tree --
 	GameState.skill_points           = int(d.get("skill_points", 0))
 	GameState.skill_tree             = d.get("skill_tree", {})
@@ -193,7 +235,7 @@ func load_game() -> void:
 	GameState.visited_stone_quarry   = int(d.get("visited_stone_quarry", 0))
 	GameState.visited_sand_pit       = int(d.get("visited_sand_pit", 0))
 	GameState.blasting_caps_fired            = int(d.get("blasting_caps_fired", 0))
-	GameState.utility_counts                 = d.get("utility_counts", {})
+	GameState.utility_counts                 = _int_values(d.get("utility_counts", {}))
 	GameState.utility_recharge_at            = d.get("utility_recharge_at", {})
 	GameState.yield_charge_stacks            = int(d.get("yield_charge_stacks", 0))
 	GameState.apprentice_notice_stacks       = int(d.get("apprentice_notice_stacks", 0))
@@ -220,12 +262,15 @@ func load_game() -> void:
 
 	# Migrate crew: add location_id if missing (timber → lumber_yard, stone → stone_quarry)
 	for member: Dictionary in GameState.crew:
+		member["level"] = int(member.get("level", 1))
 		if not member.has("location_id") or member["location_id"] == "":
 			var mat: String = member.get("material_type", "timber")
 			member["location_id"] = "stone_quarry" if mat == "stone" else "lumber_yard"
 
-	GameState.active_node_count          = int(d.get("active_node_count", 1))
-	GameState.location_unlock_progress   = d.get("location_unlock_progress", {})
+	# Node count is derived from the Extra Node Slot upgrade rather than trusted
+	# from the save: older saves kept a stale count after prestige reset the upgrade.
+	GameState.active_node_count          = 1 + int(GameState.upgrades.get("extra_node_slot", 0))
+	GameState.location_unlock_progress   = _int_values(d.get("location_unlock_progress", {}))
 
 	# Load location_nodes; migrate old single-dict format → array; fill missing from defaults
 	var saved_nodes: Dictionary = d.get("location_nodes", {})
@@ -237,9 +282,11 @@ func load_game() -> void:
 			GameState.location_nodes[loc_id] = [val] if val is Dictionary else val
 		else:
 			GameState.location_nodes[loc_id] = defaults[loc_id]
-	# Pad each location's node array to match active_node_count
+	# Pad or trim each location's node array to match active_node_count
 	for loc_id: String in GameState.location_nodes.keys():
 		var nodes: Array = GameState.location_nodes[loc_id]
+		if nodes.size() > GameState.active_node_count:
+			nodes.resize(GameState.active_node_count)
 		while nodes.size() < GameState.active_node_count:
 			var best := BuildDatabase.get_active_node(loc_id, GameState.player_level)
 			if best.is_empty(): break
@@ -323,14 +370,13 @@ func prestige_reset(rep_earned: int) -> void:
 	GameState.player_xp          = 0.0
 	GameState.active_location_id         = "lumber_yard"
 	GameState.location_nodes             = BuildDatabase.get_default_location_nodes()
+	GameState.active_node_count          = 1   # Extra Node Slot upgrade resets below
 	GameState.location_unlock_progress   = {}
 	GameState.upgrades           = {}
 	GameState.skill_points       = 0
 	GameState.skill_tree         = {}
-	GameState.trade_show_state   = {
-		"event_index": 0, "expires_at": 0.0,
-		"task_progress": {}, "claimed_rewards": [0, 0, 0],
-	}
+	# trade_show_state is deliberately kept: events run on their own 7-day clock,
+	# and resetting it let players re-claim the same rewards every contract.
 	save_game()
 
 func _default_building() -> Dictionary:

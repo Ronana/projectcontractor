@@ -101,7 +101,7 @@ var lifetime_nodes_broken: int = 0
 
 # -- Trade Shows -------------------------------------------------------------
 ## State for the currently active (or most recently expired) Trade Show event.
-## Resets when a new event starts. Resets on prestige.
+## Resets when a new event starts. Survives prestige (events run on their own clock).
 ## Fields:
 ##   event_index     : int    — index into TradeShowDatabase.EVENTS
 ##   expires_at      : float  — unix timestamp when this event ends
@@ -270,6 +270,16 @@ func get_mat_yield_mult(mat_id: String) -> float:
 	var entry: Dictionary = blueprints.get(bp_id, {})
 	var lvl: int = int(entry.get("level", 0))
 	return 1.0 + BlueprintDatabase.total_bonus(lvl)
+
+## Applies a material's blueprint yield bonus to a whole-number quantity.
+## The fractional part becomes a chance of +1, so small drops still benefit
+## on average (e.g. 1 drop at +40% gives 2 on 40% of breaks).
+func roll_yield(mat_id: String, qty: int) -> int:
+	var exact := float(qty) * get_mat_yield_mult(mat_id)
+	var whole := int(exact)
+	if randf() < exact - float(whole):
+		whole += 1
+	return whole
 
 ## Stage cash multiplier from building blueprints.
 func get_building_cash_mult(tier_id: String) -> float:

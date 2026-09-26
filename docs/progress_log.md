@@ -1,5 +1,25 @@
 # Project Contractor — Progress Log
 
+## Session 10 — 2026-09-27
+
+### Completed
+- **Godot 4.7.1 upgrade**: project runs with no parse/runtime errors. Full code audit done.
+- **Test suite**: `tests/test_runner.gd` (16 headless tests, isolated test save). Excluded from export.
+- **Save safety**: saves write to `save.json.tmp` then swap in; the previous save is kept as `save.bak.json`. Unreadable saves are copied to `save.corrupt.json` and the game restores from the backup instead of starting fresh.
+- **Save types**: counts (materials, upgrades, utilities, missions, blueprints, crew levels, trade show) reload as ints — UTILS badges no longer show "200.0".
+- **Bug fixes**:
+  - Contract panel crashed once the portfolio was non-empty (`t.has()` on a Resource).
+  - Prestige left `active_node_count` at the old value; now resets, and load derives it from the Extra Node Slot level (repairs existing saves).
+  - Trade Show rewards could be re-claimed after prestige; trade show state now survives prestige.
+  - Copper blueprint id was `bp_copper` but the material is `copper_ore`, so it never dropped.
+  - Material blueprints (+8%/level yield) were never applied; now apply to node drops, crafting and offline gains via `GameState.roll_yield()`.
+  - Experienced Crew artifact had no effect; hires now start at `get_crew_start_level()`.
+  - Site Inspection fragment rewards were discarded before 15 buildings; now always granted.
+
+### Next Step
+- Install Godot 4.7.1 export templates (only 4.6.1 installed).
+- Replace `DirAccess` icon-frame listing with `ResourceLoader.list_directory()` before the next APK build (source PNGs aren't in exports).
+
 ## Session 9 — 2026-07-07
 
 ### Completed

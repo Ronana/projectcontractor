@@ -3985,7 +3985,7 @@ func _update_contract_panel() -> void:
 	for tier_id: String in counts.keys():
 		var t        := BuildDatabase.get_tier(tier_id)
 		var row      := Label.new()
-		row.text      = "  %s  ×%d" % [(t.get("name") if t.has("name") else tier_id), counts[tier_id]]
+		row.text      = "  %s  ×%d" % [t.display_name if t else tier_id, counts[tier_id]]
 		row.custom_minimum_size = Vector2(SCREEN_W, 38)
 		row.add_theme_color_override("font_color", C_TEXT)
 		_portfolio_list_box.add_child(row)
@@ -4615,7 +4615,7 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 
 	var drop_qty: int  = int(node_data.get("drop_qty", 1)) if not node_data.is_empty() else 1
 	var xp: float      = float(node_data.get("xp", 2))    if not node_data.is_empty() else 2.0
-	var total_drop: int  = drop_qty + GameState.get_drop_bonus()
+	var total_drop: int  = GameState.roll_yield(mat, drop_qty + GameState.get_drop_bonus())
 	var total_xp: float  = xp * GameState.get_xp_mult()
 	# Consume Yield Charge stack: this break gives 2x material drop
 	if GameState.yield_charge_stacks > 0:
@@ -5312,7 +5312,7 @@ func _on_hire_pressed(id: String) -> void:
 	GameState.crew.append({
 		"id":               id,
 		"display_name":     template.display_name,
-		"level":            1,
+		"level":            GameState.get_crew_start_level(),
 		"material_type":    template.material_type,
 		"base_speed_bonus": template.base_speed_bonus,
 		"location_id":      template.location_id,
@@ -5557,6 +5557,7 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 	GameState.materials[raw_id] = GameState.materials.get(raw_id, 0) - cost
 	# Double Craft chance
 	var yield_qty := 2 if randf() < GameState.get_double_craft_chance() else 1
+	yield_qty = GameState.roll_yield(ref_id, yield_qty)
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + yield_qty
 	MissionManager.add_progress("craft_items", "", yield_qty)
 	# Tutorial counters
@@ -5577,7 +5578,7 @@ func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
 	for _i in made:
 		if randf() < double_chance:
 			bonus_yield += 1
-	made += bonus_yield
+	made = GameState.roll_yield(ref_id, made + bonus_yield)
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
 	MissionManager.add_progress("craft_items", "", made)
 	if ref_id == "lumber": GameState.lumber_crafted += made
@@ -5612,7 +5613,7 @@ func _on_craft_all_everything() -> void:
 		var bonus_yield: int = 0
 		for _i in made:
 			if randf() < double_chance: bonus_yield += 1
-		made += bonus_yield
+		made = GameState.roll_yield(ref_id, made + bonus_yield)
 		GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
 		MissionManager.add_progress("craft_items", "", made)
 		if ref_id == "lumber": GameState.lumber_crafted += made
@@ -8070,9 +8071,9 @@ func _award_blueprint_fragment(bp_id: String) -> void:
 
 ## Silently awards `count` blueprint fragments without showing a fragment popup.
 ## Handles level-ups automatically. Used by inspection reward logic.
+## Unlike random drops, these are always granted (even before the Blueprints
+## menu unlocks at 15 buildings) because the inspection advertises them.
 func _grant_blueprint_fragments(bp_id: String, count: int) -> void:
-	if GameState.skyline.size() < 15:
-		return   # blueprints locked until 15 buildings complete
 	var bp := BlueprintDatabase.get_blueprint(bp_id)
 	if bp.is_empty():
 		return
