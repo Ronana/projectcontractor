@@ -118,6 +118,29 @@ func get_next_tier_id(current_tier_id: String) -> String:
 
 # ── Public API — Locations & Nodes ─────────────────────────────────────────
 
+## Returns true if loc_id is available to the player this contract.
+## lumber_yard is always unlocked. Each subsequent location requires the
+## previous one to have reached its LOCATION_UNLOCK_NODES threshold.
+func is_location_unlocked(loc_id: String) -> bool:
+	var idx := LOCATION_ORDER.find(loc_id)
+	if idx <= 0:
+		return true  # first location always unlocked
+	var prev_id: String  = LOCATION_ORDER[idx - 1]
+	var needed: int      = LOCATION_UNLOCK_NODES[idx - 1]
+	var progress: int    = GameState.location_unlock_progress.get(prev_id, 0)
+	return progress >= needed
+
+## Returns true if some unlocked location mines mat_id.
+## Materials that no location mines (e.g. crafted ones) are never gated.
+func is_material_unlocked(mat_id: String) -> bool:
+	var mined := false
+	for loc_id: String in LOCATION_ORDER:
+		if _locations.get(loc_id, {}).get("material", "") == mat_id:
+			mined = true
+			if is_location_unlocked(loc_id):
+				return true
+	return not mined
+
 ## Returns location data dict or {} if not found.
 func get_location(loc_id: String) -> Dictionary:
 	return _locations.get(loc_id, {})

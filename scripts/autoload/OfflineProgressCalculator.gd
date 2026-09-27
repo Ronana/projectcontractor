@@ -56,7 +56,8 @@ func calculate_and_apply() -> Dictionary:
 # ---------------------------------------------------------------------------
 ## Calculates effective material/s for each hired crew member based on the
 ## node HP and drop_qty at their assigned location. Matches online mine-tick
-## behaviour: applies get_worker_rate_mult() and get_drop_bonus() so offline
+## behaviour: applies get_worker_rate_mult(), get_drop_bonus() and the
+## material blueprint yield multiplier so offline
 ## rates are consistent with what the player earns while the app is open.
 func _get_idle_rates() -> Dictionary:
 	var rates:          Dictionary = {}
@@ -85,7 +86,7 @@ func _get_idle_rates() -> Dictionary:
 
 		var node_hp:  float = float(node_data.get("hp", 10))
 		var drop_qty: int   = int(node_data.get("drop_qty", 1)) + bonus_drops
-		var mat_per_s := (hp_per_s / node_hp) * float(drop_qty)
+		var mat_per_s := (hp_per_s / node_hp) * float(drop_qty) * GameState.get_mat_yield_mult(mat)
 
 		rates[mat] = rates.get(mat, 0.0) + mat_per_s
 	return rates

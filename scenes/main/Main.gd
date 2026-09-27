@@ -1420,7 +1420,7 @@ func _rebuild_loc_picker_rows(card_w: float) -> void:
 		var dname: String = loc_data.get("display_name", loc_id)
 		var mat: String   = loc_data.get("material", "timber")
 		var accent        := _mat_color(mat)
-		var unlocked: bool = _is_location_unlocked(loc_id)
+		var unlocked: bool = BuildDatabase.is_location_unlocked(loc_id)
 		var loc_idx: int   = BuildDatabase.LOCATION_ORDER.find(loc_id)
 
 		var row      := _make_animated_btn()
@@ -1510,18 +1510,6 @@ func _rebuild_loc_picker_rows(card_w: float) -> void:
 		sep.color     = C_BORDER
 		sep.custom_minimum_size = Vector2(card_w, 2)
 		_loc_picker_vbox.add_child(sep)
-
-## Returns true if loc_id is available to the player this contract.
-## lumber_yard is always unlocked. Each subsequent location requires the
-## previous one to have reached its LOCATION_UNLOCK_NODES threshold.
-func _is_location_unlocked(loc_id: String) -> bool:
-	var idx := BuildDatabase.LOCATION_ORDER.find(loc_id)
-	if idx <= 0:
-		return true  # first location always unlocked
-	var prev_id: String  = BuildDatabase.LOCATION_ORDER[idx - 1]
-	var needed: int      = BuildDatabase.LOCATION_UNLOCK_NODES[idx - 1]
-	var progress: int    = GameState.location_unlock_progress.get(prev_id, 0)
-	return progress >= needed
 
 func _on_loc_picker_open() -> void:
 	_rebuild_loc_picker_rows(SCREEN_W)
@@ -1995,22 +1983,7 @@ func _rebuild_menu_items() -> void:
 			var icon_path: String = sec_items[i][4] if sec_items[i].size() > 4 else ""
 			if icon_path.ends_with("/"):
 				# ── Animated icon: TextureRect + Timer (pure Control, no Node2D mixing) ──
-				var dir := DirAccess.open(icon_path)
-				var fnames: Array = []
-				if dir:
-					dir.list_dir_begin()
-					var fn := dir.get_next()
-					while fn != "":
-						if fn.to_lower().ends_with(".png") and not dir.current_is_dir():
-							fnames.append(fn)
-						fn = dir.get_next()
-					dir.list_dir_end()
-				fnames.sort()
-				var ftexs: Array = []
-				for fn in fnames:
-					var ftex := load(icon_path + fn) as Texture2D
-					if ftex:
-						ftexs.append(ftex)
+				var ftexs := _load_anim_frames(icon_path)
 				if ftexs.size() > 0:
 					var first_tex: Texture2D = ftexs[0]
 					var nat    := first_tex.get_size()
@@ -3985,7 +3958,7 @@ func _update_contract_panel() -> void:
 	for tier_id: String in counts.keys():
 		var t        := BuildDatabase.get_tier(tier_id)
 		var row      := Label.new()
-		row.text      = "  %s  ×%d" % [(t.get("name") if t.has("name") else tier_id), counts[tier_id]]
+		row.text      = "  %s  ×%d" % [t.display_name if t else tier_id, counts[tier_id]]
 		row.custom_minimum_size = Vector2(SCREEN_W, 38)
 		row.add_theme_color_override("font_color", C_TEXT)
 		_portfolio_list_box.add_child(row)
@@ -4470,7 +4443,7 @@ func _on_shop_close() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _on_location_btn(loc_id: String) -> void:
-	if not _is_location_unlocked(loc_id):
+	if not BuildDatabase.is_location_unlocked(loc_id):
 		return
 	if GameState.active_location_id == loc_id:
 		_loc_picker_panel.visible = false
@@ -4615,7 +4588,7 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 
 	var drop_qty: int  = int(node_data.get("drop_qty", 1)) if not node_data.is_empty() else 1
 	var xp: float      = float(node_data.get("xp", 2))    if not node_data.is_empty() else 2.0
-	var total_drop: int  = drop_qty + GameState.get_drop_bonus()
+	var total_drop: int  = GameState.roll_yield(mat, drop_qty + GameState.get_drop_bonus())
 	var total_xp: float  = xp * GameState.get_xp_mult()
 	# Consume Yield Charge stack: this break gives 2x material drop
 	if GameState.yield_charge_stacks > 0:
@@ -4910,6 +4883,22 @@ func _show_chest_popup(title: String, reward_lines: Array[String], accent: Color
 	)
 	_chest_popup.add_child(close_btn)
 
+## Loads every PNG frame in dir_path (which ends in "/"), sorted by file name.
+## Uses ResourceLoader, not DirAccess: exported builds ship only the .import
+## remaps, so DirAccess would find no .png files on device.
+func _load_anim_frames(dir_path: String) -> Array:
+	var fnames: Array = []
+	for fn in ResourceLoader.list_directory(dir_path):
+		if fn.to_lower().ends_with(".png"):
+			fnames.append(fn)
+	fnames.sort()
+	var ftexs: Array = []
+	for fn in fnames:
+		var ftex := load(dir_path + fn) as Texture2D
+		if ftex:
+			ftexs.append(ftex)
+	return ftexs
+
 ## Full-screen chest-opening popup: animation centre-screen, rewards below.
 func _show_animated_opening_popup(anim_dir: String, reward_lines: Array, accent: Color) -> void:
 	if _chest_popup:
@@ -4957,22 +4946,7 @@ func _show_animated_opening_popup(anim_dir: String, reward_lines: Array, accent:
 	_chest_popup.add_child(top_bar)
 
 	# ── Chest animation (TextureRect + Timer) ────────────────────────────
-	var adir      := DirAccess.open(anim_dir)
-	var fnames: Array = []
-	if adir:
-		adir.list_dir_begin()
-		var fn := adir.get_next()
-		while fn != "":
-			if fn.to_lower().ends_with(".png") and not adir.current_is_dir():
-				fnames.append(fn)
-			fn = adir.get_next()
-		adir.list_dir_end()
-	fnames.sort()
-	var ftexs: Array = []
-	for fn in fnames:
-		var ftex := load(anim_dir + fn) as Texture2D
-		if ftex:
-			ftexs.append(ftex)
+	var ftexs := _load_anim_frames(anim_dir)
 
 	var anim_y := cy + 28.0
 	if ftexs.size() > 0:
@@ -5312,7 +5286,7 @@ func _on_hire_pressed(id: String) -> void:
 	GameState.crew.append({
 		"id":               id,
 		"display_name":     template.display_name,
-		"level":            1,
+		"level":            GameState.get_crew_start_level(),
 		"material_type":    template.material_type,
 		"base_speed_bonus": template.base_speed_bonus,
 		"location_id":      template.location_id,
@@ -5557,6 +5531,7 @@ func _on_craft_one(raw_id: String, ref_id: String, cost: int) -> void:
 	GameState.materials[raw_id] = GameState.materials.get(raw_id, 0) - cost
 	# Double Craft chance
 	var yield_qty := 2 if randf() < GameState.get_double_craft_chance() else 1
+	yield_qty = GameState.roll_yield(ref_id, yield_qty)
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + yield_qty
 	MissionManager.add_progress("craft_items", "", yield_qty)
 	# Tutorial counters
@@ -5577,7 +5552,7 @@ func _on_craft_all(raw_id: String, ref_id: String, cost: int) -> void:
 	for _i in made:
 		if randf() < double_chance:
 			bonus_yield += 1
-	made += bonus_yield
+	made = GameState.roll_yield(ref_id, made + bonus_yield)
 	GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
 	MissionManager.add_progress("craft_items", "", made)
 	if ref_id == "lumber": GameState.lumber_crafted += made
@@ -5612,7 +5587,7 @@ func _on_craft_all_everything() -> void:
 		var bonus_yield: int = 0
 		for _i in made:
 			if randf() < double_chance: bonus_yield += 1
-		made += bonus_yield
+		made = GameState.roll_yield(ref_id, made + bonus_yield)
 		GameState.materials[ref_id] = GameState.materials.get(ref_id, 0) + made
 		MissionManager.add_progress("craft_items", "", made)
 		if ref_id == "lumber": GameState.lumber_crafted += made
@@ -6573,7 +6548,7 @@ func _stats_value(key: String) -> String:
 			var count := 0
 			var locs: Array = BuildDatabase.LOCATION_ORDER
 			for loc_id: String in locs:
-				if _is_location_unlocked(loc_id):
+				if BuildDatabase.is_location_unlocked(loc_id):
 					count += 1
 			return str(count) + " / " + str(locs.size())
 		"nodes_this_contract":
@@ -7244,7 +7219,7 @@ func _update_next_unlock_badge() -> void:
 		return
 	var next_id: String   = loc_order[loc_idx + 1]
 	# Hide badge when the next location is already unlocked
-	if _is_location_unlocked(next_id):
+	if BuildDatabase.is_location_unlocked(next_id):
 		_next_unlock_widget.visible = false
 		return
 	_next_unlock_widget.visible = true
@@ -8070,9 +8045,9 @@ func _award_blueprint_fragment(bp_id: String) -> void:
 
 ## Silently awards `count` blueprint fragments without showing a fragment popup.
 ## Handles level-ups automatically. Used by inspection reward logic.
+## Unlike random drops, these are always granted (even before the Blueprints
+## menu unlocks at 15 buildings) because the inspection advertises them.
 func _grant_blueprint_fragments(bp_id: String, count: int) -> void:
-	if GameState.skyline.size() < 15:
-		return   # blueprints locked until 15 buildings complete
 	var bp := BlueprintDatabase.get_blueprint(bp_id)
 	if bp.is_empty():
 		return
@@ -8544,7 +8519,7 @@ func _update_delivery_pallet_panel() -> void:
 		row.add_child(lbl)
 
 		var sub_lbl      := Label.new()
-		sub_lbl.text      = "Contains materials and cash"
+		sub_lbl.text      = "Contains 1–3 random Toolbox Items"
 		sub_lbl.position  = Vector2(20, 44)
 		sub_lbl.size      = Vector2(380, 22)
 		sub_lbl.add_theme_font_size_override("font_size", 14)

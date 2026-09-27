@@ -90,14 +90,18 @@ func _generate_missions(out_array: Array, pool: Array, count: int, now: float, w
 	var rng := RandomNumberGenerator.new()
 	rng.seed = seed_val
 
+	# Skip collect missions for materials the player can't mine yet
+	var avail: Array = pool.filter(func(t: Dictionary) -> bool:
+		return t["type"] != "collect_mat" or BuildDatabase.is_material_unlocked(t["mat"]))
+
 	# Shuffle indices without repeating
-	var indices := range(pool.size())
+	var indices := range(avail.size())
 	for i in range(indices.size() - 1, 0, -1):
 		var j: int = rng.randi_range(0, i)
 		var tmp = indices[i]; indices[i] = indices[j]; indices[j] = tmp
 
-	for i in count:
-		var tmpl: Dictionary = pool[indices[i]]
+	for i in mini(count, avail.size()):
+		var tmpl: Dictionary = avail[indices[i]]
 		var mission := {
 			"id":           "%s_%d_%d" % ["w" if weekly else "d", seed_val, i],
 			"type":         tmpl["type"],

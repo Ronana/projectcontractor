@@ -48,6 +48,16 @@ A mobile idle/incremental construction tycoon game built with **Godot 4.6** and 
 2. Clone the repo and open `project.godot` in the Godot editor
 3. Run the main scene (`scenes/main/Main.tscn`)
 
+## Running the Tests
+
+A headless regression suite lives in `tests/test_runner.gd`. It uses its own save file, so it never touches your real progress:
+
+```bash
+godot --headless --path . -s res://tests/test_runner.gd
+```
+
+Exit code `0` means every test passed.
+
 ## Development Log
 
 Detailed session-by-session progress is kept in [`docs/progress_log.md`](docs/progress_log.md).

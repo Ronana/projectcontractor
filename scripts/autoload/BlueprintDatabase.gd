@@ -50,9 +50,9 @@ const BLUEPRINTS: Array[Dictionary] = [
 		"color": Color(0.80, 0.45, 0.30), "symbol": "C",
 	},
 	{
-		"id": "bp_copper",   "name": "Copper Blueprint",
+		"id": "bp_copper_ore", "name": "Copper Blueprint",
 		"desc": "+8% copper yield per level",
-		"category": "raw",   "effect": "mat_yield",  "target": "copper",
+		"category": "raw",   "effect": "mat_yield",  "target": "copper_ore",
 		"color": Color(0.85, 0.52, 0.25), "symbol": "Cu",
 	},
 	{
