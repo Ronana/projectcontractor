@@ -4,13 +4,13 @@
 
 ### Completed
 - **Animated icons in exports**: the MORE-menu icons and the chest/delivery opening popup listed frames with `DirAccess`, which finds no `.png` files in an APK (only the `.import` remaps are packed). Both now share `_load_anim_frames()`, which uses `ResourceLoader.list_directory()`. New test `test_anim_frames_load_without_source_pngs` rebuilds the exported layout (`.import` files only) and checks the frames load in order (17 tests).
-- **Export templates**: Godot 4.7.1 templates installed; a headless debug APK export of the Android preset succeeds.
+- **Export templates**: Godot 4.7.1 and 4.7.2 templates installed. The editor is now 4.7.2 (`F:\Downloads\Godot_v4.7.2-stable_win64.exe\`); the test suite passes and a headless debug APK export of the Android preset succeeds on 4.7.2.
 - **Display settings audit** (Session 7 claimed `allow_hidpi`, `stretch/scale` and `window/size/mode=4` were added; none are in `project.godot`, and they never were in git): no change needed. `allow_hidpi=true` and `stretch/scale=1.0` are Godot's defaults, which the editor strips on save. Android fullscreen comes from the export preset's `screen/immersive_mode=true`; `window/size/mode=4` would only force exclusive fullscreen on desktop runs.
 - **Missions skip locked materials**: daily/weekly generation filters out `collect_mat` templates whose material no unlocked location mines (previously a fresh contract could ask for copper). The unlock check moved from `Main._is_location_unlocked()` to `BuildDatabase.is_location_unlocked()`, plus a new `is_material_unlocked()`. Missions generated before this fix refresh at the next daily/weekly reset.
 - **Descriptions match effects**: the Delivery Pallet panel said "Contains materials and cash" but pallets give 1–3 random Toolbox Items; Site Reputation said "+10% cash from all sources" but only boosts build-stage cash (now worded like the Cash Bonus upgrade). 21 tests.
 
 ### Next Step
-- Install Godot 4.7.1 export templates (only 4.6.1 installed), then build an APK and confirm the animated icons play on device.
+- Install a debug APK on the S24 and confirm the animated menu/chest icons play.
 
 ## Session 10 — 2026-09-27
 
