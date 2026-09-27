@@ -55,7 +55,7 @@ func _run() -> void:
 		_fresh()
 		_checks = 0
 		_test_failed = false
-		call(test_name)
+		await call(test_name)  # tests may await frames
 		if _checks == 0:
 			# A script error aborted the test before it asserted anything.
 			_test_failed = true
@@ -326,6 +326,47 @@ func test_site_reputation_description_matches_stage_cash_effect() -> void:
 	var desc: String = root.get_node("ArtifactDatabase").get_artifact("site_reputation")["description"]
 	_expect("stage" in desc and not "all sources" in desc,
 		"description names build-stage cash only (got \"%s\")" % desc)
+
+# ── Layout on tall screens ──────────────────────────────────────────────────
+
+## S24 Ultra in keep_width mode: the logical viewport is 720 × ~1544.
+func test_stats_panel_fills_tall_screen() -> void:
+	var old_panel: CanvasLayer = _main._stats_panel
+	var old_h: int = _main.SCREEN_H
+	_main.SCREEN_H = 1544
+	_main._build_stats_panel()
+	var layer: CanvasLayer = _main._stats_panel
+	var bg: ColorRect   = layer.get_child(0)
+	var card: ColorRect = layer.get_child(1)
+	_expect_eq(bg.size.y, 1544.0, "backdrop covers the full screen height")
+	var top_gap: float    = card.position.y
+	var bottom_gap: float = 1544.0 - (card.position.y + card.size.y)
+	_expect(is_equal_approx(top_gap, bottom_gap),
+		"panel centred vertically (top gap %.0f, bottom gap %.0f)" % [top_gap, bottom_gap])
+	layer.free()
+	_main._stats_panel = old_panel
+	_main.SCREEN_H = old_h
+
+# ── UI built after startup ──────────────────────────────────────────────────
+
+func test_ui_built_after_startup_gets_font_and_scale() -> void:
+	var old_scale: float = _main.UI_SCALE
+	_main.UI_SCALE = 1.5
+	GS.pending_delivery_pallets = 1
+	_main._update_delivery_pallet_panel()  # rebuilds its rows long after _ready
+	await process_frame
+	var lbl: Label = null
+	for c in _main._dp_content_root.find_children("*", "Label", true, false):
+		if not c.is_queued_for_deletion() and "Delivery Pallet" in (c as Label).text:
+			lbl = c
+	_main.UI_SCALE = old_scale
+	_expect(lbl != null, "pallet row label exists")
+	if lbl == null:
+		return
+	var font: Font = lbl.get_theme_font("font")
+	_expect(font != null and font.resource_path.ends_with("Rajdhani-Bold.ttf"),
+		"late label uses Rajdhani Bold (got %s)" % (font.resource_path if font else "none"))
+	_expect_eq(lbl.get_theme_font_size("font_size"), 33, "late label font 22 × UI_SCALE 1.5")
 
 # ── Exported builds ─────────────────────────────────────────────────────────
 

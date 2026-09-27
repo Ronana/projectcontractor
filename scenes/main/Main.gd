@@ -429,35 +429,50 @@ func _ready() -> void:
 	_update_display()
 	_check_offline_summary()
 	_apply_global_font()
-	_apply_global_font_scale()
 	_build_intro_strip()
 	_build_consent_panel()
 
-func _apply_global_font() -> void:
-	var bold := load("res://assets/fonts/Rajdhani-Bold.ttf")     as FontFile
-	var semi := load("res://assets/fonts/Rajdhani-SemiBold.ttf") as FontFile
-	if not bold or not semi:
-		push_warning("Rajdhani fonts not found — using default font")
-		return
-	for lbl: Label  in find_children("*", "Label",  true, false):
-		lbl.add_theme_font_override("font", bold)
-	for btn: Button in find_children("*", "Button", true, false):
-		btn.add_theme_font_override("font", semi)
+var _ui_font_bold: FontFile
+var _ui_font_semi: FontFile
+var _late_ui_queue: Array[Control] = []
 
-## Scale all explicit font-size overrides by UI_SCALE.
-## Called after all build functions so every node exists.
-## Skipped when UI_SCALE is 1.0 (editor / low-DPI desktop).
-func _apply_global_font_scale() -> void:
-	if UI_SCALE <= 1.01:
+## Applies the Rajdhani fonts and UI_SCALE to every Label and Button built so
+## far, then keeps styling ones built later (panel rows, popups) as they enter
+## the tree. Called once, after all _build_* functions in _ready().
+func _apply_global_font() -> void:
+	_ui_font_bold = load("res://assets/fonts/Rajdhani-Bold.ttf")     as FontFile
+	_ui_font_semi = load("res://assets/fonts/Rajdhani-SemiBold.ttf") as FontFile
+	if not _ui_font_bold or not _ui_font_semi:
+		push_warning("Rajdhani fonts not found — using default font")
+	for n: Control in find_children("*", "Label", true, false) + find_children("*", "Button", true, false):
+		_style_ui_node(n)
+	get_tree().node_added.connect(_on_node_added)
+
+## Font + UI_SCALE for one Label/Button. Marks the node so it is never scaled twice.
+## Scaling is skipped when UI_SCALE is 1.0 (editor / low-DPI desktop).
+func _style_ui_node(n: Control) -> void:
+	if n.has_meta("ui_styled"):
 		return
-	for lbl: Label in find_children("*", "Label", true, false):
-		if lbl.has_theme_font_size_override("font_size"):
-			var sz := lbl.get_theme_font_size("font_size")
-			lbl.add_theme_font_size_override("font_size", roundi(sz * UI_SCALE))
-	for btn: Button in find_children("*", "Button", true, false):
-		if btn.has_theme_font_size_override("font_size"):
-			var sz := btn.get_theme_font_size("font_size")
-			btn.add_theme_font_size_override("font_size", roundi(sz * UI_SCALE))
+	n.set_meta("ui_styled", true)
+	var font: FontFile = _ui_font_bold if n is Label else _ui_font_semi
+	if font:
+		n.add_theme_font_override("font", font)
+	if UI_SCALE > 1.01 and n.has_theme_font_size_override("font_size"):
+		n.add_theme_font_size_override("font_size", roundi(n.get_theme_font_size("font_size") * UI_SCALE))
+
+## Nodes are often added before their font size is set, so style them at the
+## end of the frame once the building code has finished.
+func _on_node_added(n: Node) -> void:
+	if (n is Label or n is Button) and is_ancestor_of(n):
+		if _late_ui_queue.is_empty():
+			_flush_late_ui.call_deferred()
+		_late_ui_queue.append(n)
+
+func _flush_late_ui() -> void:
+	for n in _late_ui_queue:
+		if is_instance_valid(n) and not n.is_queued_for_deletion():
+			_style_ui_node(n)
+	_late_ui_queue.clear()
 
 var _mission_countdown_timer: float = 0.0
 
@@ -1405,7 +1420,6 @@ func _build_loc_picker_panel() -> void:
 	scroll.size      = Vector2(card_w, card_h - 60)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_loc_picker_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	_loc_picker_vbox      = VBoxContainer.new()
 	_loc_picker_vbox.custom_minimum_size = Vector2(card_w, 0)
@@ -2482,7 +2496,6 @@ func _build_crew_panel() -> void:
 	scroll.position  = Vector2(0, 130)
 	scroll.size      = Vector2(SCREEN_W, SCREEN_H - 130 - BOTTOM_BAR_H)
 	_crew_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	_crew_scroll_content = Control.new()
 	_crew_scroll_content.custom_minimum_size = Vector2(SCREEN_W, templates.size() * 210 + 20)
@@ -2736,7 +2749,6 @@ func _build_craft_panel() -> void:
 	scroll.position  = Vector2(0, 410)
 	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 410)
 	_craft_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	var vbox      := VBoxContainer.new()
 	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
@@ -2907,7 +2919,6 @@ func _build_skyline_panel() -> void:
 	scroll.position  = Vector2(0, 134)
 	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 134 - 90)
 	_skyline_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	_skyline_list_box          = VBoxContainer.new()
 	_skyline_list_box.position = Vector2.ZERO
@@ -2988,7 +2999,6 @@ func _build_sell_panel() -> void:
 	scroll.position  = Vector2(0, 178)
 	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 178)
 	_sell_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	var vbox      := VBoxContainer.new()
 	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
@@ -3118,7 +3128,6 @@ func _build_upgrades_panel() -> void:
 	_upgrades_scroll_general.position = Vector2(0, CONTENT_Y)
 	_upgrades_scroll_general.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - CONTENT_Y)
 	_upgrades_panel.add_child(_upgrades_scroll_general)
-	_wire_scroll_drag(_upgrades_scroll_general)
 
 	var list := VBoxContainer.new()
 	list.name = "UpgradeList"
@@ -3143,7 +3152,6 @@ func _build_upgrades_panel() -> void:
 	_upgrades_scroll_skills.size     = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - CONTENT_Y - 144)
 	_upgrades_scroll_skills.visible  = false
 	_upgrades_panel.add_child(_upgrades_scroll_skills)
-	_wire_scroll_drag(_upgrades_scroll_skills)
 
 	_build_skills_tab(_upgrades_scroll_skills)
 	_build_skill_detail_card()
@@ -3635,7 +3643,6 @@ func _build_contract_panel() -> void:
 	scroll.position  = Vector2(0, 148)
 	scroll.size      = Vector2(SCREEN_W, SCREEN_H - BOTTOM_BAR_H - 148)
 	_contract_panel.add_child(scroll)
-	_wire_scroll_drag(scroll)
 
 	var vbox      := VBoxContainer.new()
 	vbox.custom_minimum_size = Vector2(SCREEN_W, 0)
@@ -4276,9 +4283,6 @@ func _on_menu_contract() -> void:
 func _on_contract_close() -> void:
 	_contract_panel.visible = false
 
-func _on_skyline_new_contract_close() -> void:
-	_skyline_panel.visible = false
-
 func _on_new_contract_pressed() -> void:
 	if GameState.player_level < 10:
 		return
@@ -4644,7 +4648,6 @@ func _break_node(loc_id: String, node_idx: int) -> void:
 	_update_hud()
 	_update_mine_mat_label()
 	_update_next_unlock_badge()
-	_update_chest_btn()
 	_check_intro_tasks()
 
 ## Spawn a fresh wave of nodes for a location with randomised HP.
@@ -4672,11 +4675,6 @@ func _spawn_wave(loc_id: String) -> void:
 			GameState.pending_delivery_pallets += 1
 			if loc_id == GameState.active_location_id:
 				_flash_feedback("📦 Delivery Pallet ready!")
-
-func _update_chest_btn() -> void:
-	# Inline chest button removed — chests are opened via the menu panels.
-	# Flash a notification so the player knows to check the menu.
-	pass
 
 func _on_open_delivery_pallet_btn() -> void:
 	if GameState.pending_delivery_pallets <= 0:
@@ -4805,83 +4803,6 @@ func _show_unlock_popup(next_loc_id: String) -> void:
 	hint_lbl.add_theme_color_override("font_color", C_DIM)
 	hint_lbl.mouse_filter                = Control.MOUSE_FILTER_IGNORE
 	popup.add_child(hint_lbl)
-
-func _show_chest_popup(title: String, reward_lines: Array[String], accent: Color) -> void:
-	if _chest_popup:
-		_chest_popup.queue_free()
-	_chest_popup        = CanvasLayer.new()
-	_chest_popup.layer  = 35
-	add_child(_chest_popup)
-
-	# Full-screen dim — tapping anywhere (except COLLECT) closes the popup
-	var dim_btn      := Button.new()
-	dim_btn.flat      = true
-	dim_btn.position  = Vector2.ZERO
-	dim_btn.size      = Vector2(SCREEN_W, SCREEN_H)
-	var _cs_style    := StyleBoxFlat.new()
-	_cs_style.bg_color = Color(0.0, 0.0, 0.0, 0.72)
-	dim_btn.add_theme_stylebox_override("normal",  _cs_style)
-	dim_btn.add_theme_stylebox_override("hover",   _cs_style)
-	dim_btn.add_theme_stylebox_override("pressed", _cs_style)
-	dim_btn.pressed.connect(func():
-		_chest_popup.queue_free()
-		_chest_popup = null
-	)
-	_chest_popup.add_child(dim_btn)
-
-	var card_w := 560
-	var card_h := 280 + reward_lines.size() * 36
-	var card   := ColorRect.new()
-	card.color        = C_PANEL
-	card.position     = Vector2((SCREEN_W - card_w) / 2.0, (SCREEN_H - card_h) / 2.0)
-	card.size         = Vector2(card_w, card_h)
-	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_chest_popup.add_child(card)
-
-	var top_bar           := ColorRect.new()
-	top_bar.color          = accent
-	top_bar.position       = card.position
-	top_bar.size           = Vector2(card_w, 4)
-	top_bar.mouse_filter   = Control.MOUSE_FILTER_IGNORE
-	_chest_popup.add_child(top_bar)
-
-	var title_lbl           := Label.new()
-	title_lbl.text           = title
-	title_lbl.position       = Vector2(card.position.x + 16, card.position.y + 16)
-	title_lbl.size           = Vector2(card_w - 32, 40)
-	title_lbl.add_theme_font_size_override("font_size", 26)
-	title_lbl.add_theme_color_override("font_color", accent)
-	_chest_popup.add_child(title_lbl)
-
-	var sub_lbl           := Label.new()
-	sub_lbl.text           = "You received:"
-	sub_lbl.position       = Vector2(card.position.x + 16, card.position.y + 62)
-	sub_lbl.size           = Vector2(card_w - 32, 28)
-	sub_lbl.add_theme_font_size_override("font_size", 18)
-	sub_lbl.add_theme_color_override("font_color", C_DIM)
-	_chest_popup.add_child(sub_lbl)
-
-	for i in reward_lines.size():
-		var rl           := Label.new()
-		rl.text           = "• " + reward_lines[i]
-		rl.position       = Vector2(card.position.x + 24, card.position.y + 96 + i * 36)
-		rl.size           = Vector2(card_w - 48, 32)
-		rl.add_theme_font_size_override("font_size", 20)
-		rl.add_theme_color_override("font_color", accent)
-		_chest_popup.add_child(rl)
-
-	var close_y := card.position.y + card_h - 64
-	var close_btn      := _make_animated_btn()
-	close_btn.text      = "COLLECT"
-	close_btn.position  = Vector2(card.position.x + card_w / 2 - 100, close_y)
-	close_btn.size      = Vector2(200, 48)
-	close_btn.add_theme_font_size_override("font_size", 20)
-	close_btn.add_theme_color_override("font_color", accent)
-	close_btn.pressed.connect(func():
-		_chest_popup.queue_free()
-		_chest_popup = null
-	)
-	_chest_popup.add_child(close_btn)
 
 ## Loads every PNG frame in dir_path (which ends in "/"), sorted by file name.
 ## Uses ResourceLoader, not DirAccess: exported builds ship only the .import
@@ -5153,9 +5074,6 @@ func _on_tap_build() -> void:
 		_complete_stage()
 	else:
 		_update_build_panel()
-
-func _on_build_panel_opened() -> void:
-	_update_build_panel()
 
 # ══════════════════════════════════════════════════════════════════════════
 # Stage / building logic
@@ -6401,8 +6319,8 @@ func _on_menu_tradeshow() -> void:
 func _build_stats_panel() -> void:
 	const PW := 680
 	const PH := 960
-	const PX := (720 - PW) / 2
-	const PY := (1280 - PH) / 2
+	var PX: int = (SCREEN_W - PW) / 2
+	var PY: int = (SCREEN_H - PH) / 2  # centre on the real screen, not the 1280 design height
 
 	_stats_panel = CanvasLayer.new()
 	_stats_panel.layer = 22
@@ -6411,7 +6329,7 @@ func _build_stats_panel() -> void:
 
 	var bg := ColorRect.new()
 	bg.color = Color(0, 0, 0, 0.75)
-	bg.size  = Vector2(720, 1280)
+	bg.size  = Vector2(SCREEN_W, SCREEN_H)
 	_stats_panel.add_child(bg)
 
 	var panel := ColorRect.new()
@@ -7206,9 +7124,6 @@ func _update_mine_screen() -> void:
 	var wrate := _worker_damage_rate(loc_id)
 	_lbl_mine_rate.text = "Mine Power: %d  ·  Workers: %.1f HP/s" % [mp, wrate]
 
-	# Chest button
-	_update_chest_btn()
-
 ## Updates the next-unlock badge — cheap, safe to call after every node break.
 func _update_next_unlock_badge() -> void:
 	var loc_id    := GameState.active_location_id
@@ -7474,10 +7389,6 @@ func _wire_btn_anim(btn: Button) -> void:
 
 # For flat overlay buttons whose visuals live in sibling nodes, animate the
 # parent wrapper Control instead of the invisible button itself.
-func _wire_scroll_drag(_sc: ScrollContainer) -> void:
-	# Godot 4 handles touch drag on ScrollContainer natively on mobile.
-	# Reserved for custom drag behaviour if needed in future.
-	pass
 
 func _wire_cell_anim(cell: Control, btn: Button) -> void:
 	btn.button_down.connect(func():
