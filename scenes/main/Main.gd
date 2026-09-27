@@ -1420,7 +1420,7 @@ func _rebuild_loc_picker_rows(card_w: float) -> void:
 		var dname: String = loc_data.get("display_name", loc_id)
 		var mat: String   = loc_data.get("material", "timber")
 		var accent        := _mat_color(mat)
-		var unlocked: bool = _is_location_unlocked(loc_id)
+		var unlocked: bool = BuildDatabase.is_location_unlocked(loc_id)
 		var loc_idx: int   = BuildDatabase.LOCATION_ORDER.find(loc_id)
 
 		var row      := _make_animated_btn()
@@ -1510,18 +1510,6 @@ func _rebuild_loc_picker_rows(card_w: float) -> void:
 		sep.color     = C_BORDER
 		sep.custom_minimum_size = Vector2(card_w, 2)
 		_loc_picker_vbox.add_child(sep)
-
-## Returns true if loc_id is available to the player this contract.
-## lumber_yard is always unlocked. Each subsequent location requires the
-## previous one to have reached its LOCATION_UNLOCK_NODES threshold.
-func _is_location_unlocked(loc_id: String) -> bool:
-	var idx := BuildDatabase.LOCATION_ORDER.find(loc_id)
-	if idx <= 0:
-		return true  # first location always unlocked
-	var prev_id: String  = BuildDatabase.LOCATION_ORDER[idx - 1]
-	var needed: int      = BuildDatabase.LOCATION_UNLOCK_NODES[idx - 1]
-	var progress: int    = GameState.location_unlock_progress.get(prev_id, 0)
-	return progress >= needed
 
 func _on_loc_picker_open() -> void:
 	_rebuild_loc_picker_rows(SCREEN_W)
@@ -4455,7 +4443,7 @@ func _on_shop_close() -> void:
 # ══════════════════════════════════════════════════════════════════════════
 
 func _on_location_btn(loc_id: String) -> void:
-	if not _is_location_unlocked(loc_id):
+	if not BuildDatabase.is_location_unlocked(loc_id):
 		return
 	if GameState.active_location_id == loc_id:
 		_loc_picker_panel.visible = false
@@ -6560,7 +6548,7 @@ func _stats_value(key: String) -> String:
 			var count := 0
 			var locs: Array = BuildDatabase.LOCATION_ORDER
 			for loc_id: String in locs:
-				if _is_location_unlocked(loc_id):
+				if BuildDatabase.is_location_unlocked(loc_id):
 					count += 1
 			return str(count) + " / " + str(locs.size())
 		"nodes_this_contract":
@@ -7231,7 +7219,7 @@ func _update_next_unlock_badge() -> void:
 		return
 	var next_id: String   = loc_order[loc_idx + 1]
 	# Hide badge when the next location is already unlocked
-	if _is_location_unlocked(next_id):
+	if BuildDatabase.is_location_unlocked(next_id):
 		_next_unlock_widget.visible = false
 		return
 	_next_unlock_widget.visible = true
@@ -8531,7 +8519,7 @@ func _update_delivery_pallet_panel() -> void:
 		row.add_child(lbl)
 
 		var sub_lbl      := Label.new()
-		sub_lbl.text      = "Contains materials and cash"
+		sub_lbl.text      = "Contains 1–3 random Toolbox Items"
 		sub_lbl.position  = Vector2(20, 44)
 		sub_lbl.size      = Vector2(380, 22)
 		sub_lbl.add_theme_font_size_override("font_size", 14)

@@ -170,7 +170,7 @@ var yield_charge_stacks: int = 0
 var apprentice_notice_stacks: int = 0
 ## Total toolbox items ever used.
 var toolbox_items_used: int = 0
-## Total delivery pallets ever opened (placeholder until chest system is implemented).
+## Total delivery pallets ever opened.
 var delivery_pallets_opened: int = 0
 ## Total vintage tool chests ever opened (placeholder).
 var vintage_chests_opened: int = 0

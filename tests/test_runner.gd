@@ -19,6 +19,7 @@ var SM: Node
 var BD: Node
 var BPD: Node
 var OPC: Node
+var MM: Node
 var _main: Node
 
 var _passed := 0
@@ -35,6 +36,7 @@ func _initialize() -> void:
 	BD  = root.get_node("BuildDatabase")
 	BPD = root.get_node("BlueprintDatabase")
 	OPC = root.get_node("OfflineProgressCalculator")
+	MM  = root.get_node("MissionManager")
 	SM.save_path = TEST_SAVE
 	DirAccess.make_dir_recursive_absolute(TEST_DIR)
 	_wipe_test_files()
@@ -267,6 +269,63 @@ func test_inspection_fragments_granted_before_blueprints_unlock() -> void:
 	# Clean Build (5) + Fast Track (8) = 13 fragments: 3 → Lv1, 5 → Lv2, 5 left toward Lv3.
 	_expect_eq(int(entry.get("level", 0)), 2, "shed blueprint level")
 	_expect_eq(int(entry.get("fragments", 0)), 5, "fragments toward next level")
+
+# ── Missions ────────────────────────────────────────────────────────────────
+
+## Material ids targeted by collect_mat missions over `days` consecutive days.
+func _mission_mats(pool: Array, count: int, weekly: bool, days: int) -> Dictionary:
+	var mats := {}
+	var out: Array = []
+	var step: float = MM.SECS_PER_WEEK if weekly else MM.SECS_PER_DAY
+	for d in days:
+		MM._generate_missions(out, pool, count, 1.0e9 + d * step, weekly)
+		for m: Dictionary in out:
+			if m["type"] == "collect_mat":
+				mats[m["mat"]] = true
+	return mats
+
+func test_missions_skip_materials_from_locked_locations() -> void:
+	# Fresh contract: only the Lumber Yard (timber) is unlocked.
+	var daily  := _mission_mats(MM.DAILY_POOL, MM.DAILY_COUNT, false, 60)
+	var weekly := _mission_mats(MM.WEEKLY_POOL, MM.WEEKLY_COUNT, true, 60)
+	_expect_eq(daily.keys(), ["timber"], "daily collect targets with only Lumber Yard open")
+	_expect_eq(weekly.keys(), ["timber"], "weekly collect targets with only Lumber Yard open")
+
+func test_missions_target_newly_unlocked_materials() -> void:
+	GS.location_unlock_progress = {"lumber_yard": BD.LOCATION_UNLOCK_NODES[0]}
+	var daily := _mission_mats(MM.DAILY_POOL, MM.DAILY_COUNT, false, 60)
+	_expect(daily.has("stone"), "stone missions appear once the Stone Quarry unlocks")
+	_expect(not daily.has("sand"), "sand still locked (got %s)" % str(daily.keys()))
+
+# ── Descriptions match effects ──────────────────────────────────────────────
+
+func _label_texts(n: Node) -> String:
+	var out := ""
+	for c in n.find_children("*", "Label", true, false):
+		if not c.is_queued_for_deletion():
+			out += (c as Label).text + "\n"
+	return out
+
+func test_delivery_pallet_gives_toolbox_items_as_described() -> void:
+	GS.pending_delivery_pallets = 1
+	_main._update_delivery_pallet_panel()
+	var text := _label_texts(_main._dp_content_root)
+	_expect("Toolbox" in text and not "cash" in text.to_lower(),
+		"pallet panel describes its real contents (got %s)" % text.strip_edges().replace("\n", " | "))
+	var cash_before: int = GS.cash
+	_main._on_open_delivery_pallet_btn()
+	var items := 0
+	for v in GS.inventory.values():
+		items += int(v)
+	_expect(items >= 1 and items <= 3, "opening grants 1-3 toolbox items (got %d)" % items)
+	_expect_eq(GS.cash, cash_before, "opening grants no cash")
+
+func test_site_reputation_description_matches_stage_cash_effect() -> void:
+	GS.artifacts = {"site_reputation": 1}
+	_expect(is_equal_approx(GS.get_stage_cash_mult(), 1.1), "Lv1 → ×1.1 stage cash")
+	var desc: String = root.get_node("ArtifactDatabase").get_artifact("site_reputation")["description"]
+	_expect("stage" in desc and not "all sources" in desc,
+		"description names build-stage cash only (got \"%s\")" % desc)
 
 # ── Exported builds ─────────────────────────────────────────────────────────
 

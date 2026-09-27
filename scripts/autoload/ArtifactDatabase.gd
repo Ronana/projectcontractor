@@ -15,7 +15,7 @@ const ARTIFACTS: Array[Dictionary] = [
 	{
 		"id":          "site_reputation",
 		"name":        "Site Reputation",
-		"description": "+10% cash from all sources per level",
+		"description": "+10% cash reward per stage per level",
 		"max_level":   10,
 		"effect":      "cash_pct",
 		"bonus":       0.10,
