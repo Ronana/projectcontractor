@@ -1995,22 +1995,7 @@ func _rebuild_menu_items() -> void:
 			var icon_path: String = sec_items[i][4] if sec_items[i].size() > 4 else ""
 			if icon_path.ends_with("/"):
 				# ── Animated icon: TextureRect + Timer (pure Control, no Node2D mixing) ──
-				var dir := DirAccess.open(icon_path)
-				var fnames: Array = []
-				if dir:
-					dir.list_dir_begin()
-					var fn := dir.get_next()
-					while fn != "":
-						if fn.to_lower().ends_with(".png") and not dir.current_is_dir():
-							fnames.append(fn)
-						fn = dir.get_next()
-					dir.list_dir_end()
-				fnames.sort()
-				var ftexs: Array = []
-				for fn in fnames:
-					var ftex := load(icon_path + fn) as Texture2D
-					if ftex:
-						ftexs.append(ftex)
+				var ftexs := _load_anim_frames(icon_path)
 				if ftexs.size() > 0:
 					var first_tex: Texture2D = ftexs[0]
 					var nat    := first_tex.get_size()
@@ -4910,6 +4895,22 @@ func _show_chest_popup(title: String, reward_lines: Array[String], accent: Color
 	)
 	_chest_popup.add_child(close_btn)
 
+## Loads every PNG frame in dir_path (which ends in "/"), sorted by file name.
+## Uses ResourceLoader, not DirAccess: exported builds ship only the .import
+## remaps, so DirAccess would find no .png files on device.
+func _load_anim_frames(dir_path: String) -> Array:
+	var fnames: Array = []
+	for fn in ResourceLoader.list_directory(dir_path):
+		if fn.to_lower().ends_with(".png"):
+			fnames.append(fn)
+	fnames.sort()
+	var ftexs: Array = []
+	for fn in fnames:
+		var ftex := load(dir_path + fn) as Texture2D
+		if ftex:
+			ftexs.append(ftex)
+	return ftexs
+
 ## Full-screen chest-opening popup: animation centre-screen, rewards below.
 func _show_animated_opening_popup(anim_dir: String, reward_lines: Array, accent: Color) -> void:
 	if _chest_popup:
@@ -4957,22 +4958,7 @@ func _show_animated_opening_popup(anim_dir: String, reward_lines: Array, accent:
 	_chest_popup.add_child(top_bar)
 
 	# ── Chest animation (TextureRect + Timer) ────────────────────────────
-	var adir      := DirAccess.open(anim_dir)
-	var fnames: Array = []
-	if adir:
-		adir.list_dir_begin()
-		var fn := adir.get_next()
-		while fn != "":
-			if fn.to_lower().ends_with(".png") and not adir.current_is_dir():
-				fnames.append(fn)
-			fn = adir.get_next()
-		adir.list_dir_end()
-	fnames.sort()
-	var ftexs: Array = []
-	for fn in fnames:
-		var ftex := load(anim_dir + fn) as Texture2D
-		if ftex:
-			ftexs.append(ftex)
+	var ftexs := _load_anim_frames(anim_dir)
 
 	var anim_y := cy + 28.0
 	if ftexs.size() > 0:

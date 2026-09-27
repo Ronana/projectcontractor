@@ -267,3 +267,23 @@ func test_inspection_fragments_granted_before_blueprints_unlock() -> void:
 	# Clean Build (5) + Fast Track (8) = 13 fragments: 3 → Lv1, 5 → Lv2, 5 left toward Lv3.
 	_expect_eq(int(entry.get("level", 0)), 2, "shed blueprint level")
 	_expect_eq(int(entry.get("fragments", 0)), 5, "fragments toward next level")
+
+# ── Exported builds ─────────────────────────────────────────────────────────
+
+## An exported PCK holds "frame.png.import" + the imported .ctex, but not the
+## source "frame.png". Rebuild that layout under user:// and list it.
+func test_anim_frames_load_without_source_pngs() -> void:
+	var src   := "res://assets/sprites/ui/menu/chest/"
+	var fixt  := TEST_DIR + "/anim/"
+	DirAccess.make_dir_recursive_absolute(fixt)
+	DirAccess.copy_absolute(src + "Metal Chest - frame  01.png.import", fixt + "b.png.import")
+	DirAccess.copy_absolute(src + "Metal Chest - frame  00.png.import", fixt + "a.png.import")
+	_write_text(fixt + "notes.txt", "not a frame")
+	var frames: Array = _main._load_anim_frames(fixt)
+	_expect_eq(frames.size(), 2, "frames found from .import files alone")
+	if frames.size() == 2:
+		_expect(frames[0].resource_path.ends_with("a.png"),
+			"frames sorted by name (first is %s)" % frames[0].resource_path)
+	for f in DirAccess.get_files_at(fixt):
+		DirAccess.remove_absolute(fixt + f)
+	DirAccess.remove_absolute(fixt)

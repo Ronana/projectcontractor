@@ -1,5 +1,13 @@
 # Project Contractor — Progress Log
 
+## Session 11 — 2026-09-27
+
+### Completed
+- **Animated icons in exports**: the MORE-menu icons and the chest/delivery opening popup listed frames with `DirAccess`, which finds no `.png` files in an APK (only the `.import` remaps are packed). Both now share `_load_anim_frames()`, which uses `ResourceLoader.list_directory()`. New test `test_anim_frames_load_without_source_pngs` rebuilds the exported layout (`.import` files only) and checks the frames load in order (17 tests).
+
+### Next Step
+- Install Godot 4.7.1 export templates (only 4.6.1 installed), then build an APK and confirm the animated icons play on device.
+
 ## Session 10 — 2026-09-27
 
 ### Completed
